@@ -1,0 +1,13 @@
+{
+  "name": "ASS — Donkey Master Card Game",
+  "short_name": "ASS",
+  "description": "The ultimate classroom donkey card game. Private rooms, real-time play.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#2E1065",
+  "theme_color": "#2E1065",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
