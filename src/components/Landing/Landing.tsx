@@ -1,9 +1,11 @@
 import { motion } from 'framer-motion';
 import FloatingCards from '../common/FloatingCards';
 import { useGameStore } from '../../store/gameStore';
+import { isSupabaseConfigured } from '../../lib/supabase';
 
 export default function Landing() {
   const setView = useGameStore((s) => s.setView);
+
 
   return (
     <main className="relative min-h-[100dvh] w-full gradient-purple-blue overflow-hidden flex flex-col items-center justify-center select-none px-6 safe-top safe-bottom">
@@ -45,8 +47,16 @@ export default function Landing() {
           >
             JOIN ROOM
           </button>
+
+          {!isSupabaseConfigured && (
+            <div className="mt-2 text-xs bg-amber-500/20 border border-amber-500/40 text-amber-200 rounded-xl p-3 backdrop-blur-md text-left">
+              <p className="font-bold text-amber-300 mb-1">⚠️ Supabase Not Connected</p>
+              <p>Add <code className="bg-black/40 px-1 py-0.5 rounded text-white">VITE_SUPABASE_URL</code> and <code className="bg-black/40 px-1 py-0.5 rounded text-white">VITE_SUPABASE_PUBLISHABLE_KEY</code> in your Vercel Project Settings &gt; Environment Variables.</p>
+            </div>
+          )}
         </motion.div>
       </div>
     </main>
   );
 }
+
