@@ -95,17 +95,66 @@ export function isActivePlayer(p: PlayerRow): boolean {
 
 /**
  * Finds the next active (not escaped, still holding cards) player, walking clockwise
- * (by seat_order) starting just after `fromSeatOrder`, wrapping around the table.
+ * (by seat_order) starting just after `fromPlayerIdOrSeat`, wrapping around the table.
  */
-export function findNextActivePlayer(players: PlayerRow[], fromSeatOrder: number): PlayerRow | null {
+export function findNextActivePlayer(
+  players: PlayerRow[],
+  fromPlayerIdOrSeat: string | number
+): PlayerRow | null {
   const active = players.filter(isActivePlayer);
   if (active.length === 0) return null;
-  const sorted = [...players].sort((a, b) => a.seat_order - b.seat_order);
+  const sorted = [...players].sort(
+    (a, b) => (a.seat_order ?? 0) - (b.seat_order ?? 0) || a.id.localeCompare(b.id)
+  );
   const n = sorted.length;
-  const startIdx = sorted.findIndex((p) => p.seat_order === fromSeatOrder);
+  let startIdx = -1;
+  if (typeof fromPlayerIdOrSeat === 'string') {
+    startIdx = sorted.findIndex((p) => p.id === fromPlayerIdOrSeat);
+  }
+  if (startIdx === -1) {
+    startIdx = sorted.findIndex((p) => p.seat_order === Number(fromPlayerIdOrSeat));
+  }
+  if (startIdx === -1) {
+    startIdx = 0;
+  }
+
   for (let step = 1; step <= n; step++) {
     const candidate = sorted[(startIdx + step) % n];
     if (isActivePlayer(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Finds the next active player for the ongoing trick who has NOT yet played a card this round.
+ * Loops clockwise around the table starting right after `actorId`.
+ */
+export function findNextTrickPlayer(
+  players: PlayerRow[],
+  actorId: string,
+  centerPile: TrickCard[]
+): PlayerRow | null {
+  const playedIds = new Set(centerPile.map((tc) => tc.playerId));
+  const sorted = [...players].sort(
+    (a, b) => (a.seat_order ?? 0) - (b.seat_order ?? 0) || a.id.localeCompare(b.id)
+  );
+  const n = sorted.length;
+  if (n === 0) return null;
+
+  let startIdx = sorted.findIndex((p) => p.id === actorId);
+  if (startIdx === -1) {
+    const actor = players.find((p) => p.id === actorId);
+    if (actor) {
+      startIdx = sorted.findIndex((p) => p.seat_order === actor.seat_order);
+    }
+    if (startIdx === -1) startIdx = 0;
+  }
+
+  for (let step = 1; step <= n; step++) {
+    const candidate = sorted[(startIdx + step) % n];
+    if (isActivePlayer(candidate) && !playedIds.has(candidate.id)) {
+      return candidate;
+    }
   }
   return null;
 }
@@ -114,9 +163,12 @@ export function findNextActivePlayer(players: PlayerRow[], fromSeatOrder: number
 export function startGameDeal(players: PlayerRow[]): { players: PlayerRow[]; gameState: GameState } {
   const deck = shuffleDeck(createDeck());
   const hands = dealCards(deck, players.length);
-  const sorted = [...players].sort((a, b) => a.seat_order - b.seat_order);
+  const sorted = [...players].sort(
+    (a, b) => (a.seat_order ?? 0) - (b.seat_order ?? 0) || a.id.localeCompare(b.id)
+  );
   const updated = sorted.map((p, i) => ({
     ...p,
+    seat_order: i,
     cards: hands[i],
     escaped: false,
     escape_rank: null,
@@ -162,6 +214,11 @@ export function applyCardPlay(
   const actor = players.find((p) => p.id === actorId);
   if (!actor) throw new Error('Player not found');
 
+  // Rule: each player can put only ONE card for each round
+  if (gameState.centerPile.some((tc) => tc.playerId === actorId)) {
+    throw new Error(`${actor.name} has already played a card in this round.`);
+  }
+
   const newHand = removeCards(actor.cards, [card.id]);
   const updated = players.map((p) => (p.id === actorId ? { ...p, cards: newHand } : p));
 
@@ -171,9 +228,18 @@ export function applyCardPlay(
   const centerPile = [...gameState.centerPile, trickCard];
   const isHitPlay = !wasLeadingPlay && card.suit !== gameState.leadSuit;
 
-  const activeCount = players.filter(isActivePlayer).length;
+  const activePlayers = updated.filter(isActivePlayer);
+  const activeCount = activePlayers.length;
 
-  if (isHitPlay || centerPile.length >= activeCount) {
+  // Find the next active player who hasn't put a card in this round yet
+  const nextPlayer = isHitPlay ? null : findNextTrickPlayer(updated, actor.id, centerPile);
+
+  // Trick finishes if:
+  // - A hit occurred (someone broke the lead suit)
+  // - OR all active players have placed their 1 card (centerPile.length >= activeCount or nextPlayer === null)
+  const isTrickComplete = isHitPlay || !nextPlayer || centerPile.length >= activeCount;
+
+  if (isTrickComplete) {
     const resolution = resolveTrick(centerPile, leadSuit);
     const centerCards = centerPile.map((tc) => tc.card);
 
@@ -211,13 +277,12 @@ export function applyCardPlay(
     };
   }
 
-  // Trick continues normally — advance to the next active player.
-  const next = findNextActivePlayer(updated, actor.seat_order);
+  // Trick continues normally — advance to the next active player who has NOT yet played this round.
   const newGameState: GameState = {
     ...gameState,
     centerPile,
     leadSuit,
-    currentTurn: next ? next.id : null,
+    currentTurn: nextPlayer.id,
     hitOccurred: false,
     trickWinnerId: null,
     lastEvent: null,
@@ -274,7 +339,7 @@ export function finalizeTrickResolution(
     );
     rankings.push(candidate.id);
     events.push({ type: 'escaped', playerId: candidate.id, playerName: candidate.name, place: rankings.length });
-    const next = findNextActivePlayer(updated, candidate.seat_order);
+    const next = findNextActivePlayer(updated, candidate.id);
     if (!next) break;
     leaderCandidateId = next.id;
   }
@@ -395,11 +460,11 @@ export function applyCardTransfer(
   let currentLeader = gameState.currentLeader;
 
   if (currentTurn === target.id) {
-    const nextTurn = findNextActivePlayer(updated, target.seat_order);
+    const nextTurn = findNextActivePlayer(updated, target.id);
     currentTurn = nextTurn ? nextTurn.id : null;
   }
   if (currentLeader === target.id) {
-    const nextLeader = findNextActivePlayer(updated, target.seat_order);
+    const nextLeader = findNextActivePlayer(updated, target.id);
     currentLeader = nextLeader ? nextLeader.id : null;
   }
 

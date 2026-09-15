@@ -68,7 +68,8 @@ export default function GameBoard() {
 
   if (!room || !me) return null;
   const gs = room.game_state;
-  const isMyTurn = gs.currentTurn === myId && !gs.gameEnded;
+  const hasPlayedThisRound = gs.centerPile.some((tc) => tc.playerId === myId);
+  const isMyTurn = gs.currentTurn === myId && !hasPlayedThisRound && !gs.gameEnded;
 
   // A round is actively in progress in the center if cards have been played
   const isRoundActive = gs.centerPile.length > 0;

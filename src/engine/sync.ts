@@ -221,6 +221,10 @@ export async function addBotPlayers(
 
   const { data, error } = await supabase.from('players').insert(botRows).select();
   if (error) throw error;
-  return ((data as PlayerRow[]) ?? []).map((p) => ({ ...p, is_bot: true }));
+  return ((data as PlayerRow[]) ?? []).map((p, idx) => ({
+    ...p,
+    seat_order: typeof p.seat_order === 'number' ? p.seat_order : existingPlayers.length + idx,
+    is_bot: true,
+  }));
 }
 

@@ -89,8 +89,13 @@ export function triggerBotTurnIfNeeded(getState: () => GameStore) {
   }
 
   const gs = room.game_state;
-  // If no turn set (e.g. during 1400ms trick observation), pause
+  // If no turn set (e.g. during trick observation), pause
   if (!gs.currentTurn) {
+    return;
+  }
+
+  // Each player can put only ONE card for each round
+  if (gs.centerPile.some((tc) => tc.playerId === gs.currentTurn)) {
     return;
   }
 
@@ -132,6 +137,7 @@ export function triggerBotTurnIfNeeded(getState: () => GameStore) {
       const fresh = getState();
       if (!fresh.room || fresh.room.status !== 'playing' || fresh.room.game_state.gameEnded) return;
       if (fresh.room.game_state.currentTurn !== currentTurnPlayer.id) return;
+      if (fresh.room.game_state.centerPile.some((tc) => tc.playerId === currentTurnPlayer.id)) return;
 
       const freshTurnPlayer = fresh.players.find((p) => p.id === currentTurnPlayer.id);
       if (freshTurnPlayer && freshTurnPlayer.cards.length > 0) {
@@ -325,7 +331,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
       const { players: dealt, gameState } = startGameDeal(allPlayers);
       await Promise.all(
-        dealt.map((p) => updatePlayer(p.id, { cards: p.cards, escaped: false, escape_rank: null }))
+        dealt.map((p) =>
+          updatePlayer(p.id, {
+            seat_order: p.seat_order,
+            cards: p.cards,
+            escaped: false,
+            escape_rank: null,
+          })
+        )
       );
       await updateRoom(room.id, { status: 'playing', game_state: gameState });
       set({
@@ -346,7 +359,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   executePlay: async (actorId: string, card: Card) => {
     const { room, players } = get();
-    if (!room) return;
+    if (!room || room.status !== 'playing' || room.game_state.gameEnded) return;
+
+    // Safety checks: player must currently hold the turn and must not have already played this round
+    if (room.game_state.currentTurn !== actorId) return;
+    if (room.game_state.centerPile.some((tc) => tc.playerId === actorId)) return;
 
     // 1. Play card onto table (step 1)
     const step1 = applyCardPlay(players, room.game_state, actorId, card);
@@ -412,14 +429,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   playCard: async (card) => {
-    const { myId } = get();
-    if (!myId) return;
+    const { myId, room } = get();
+    if (!myId || !room || room.status !== 'playing' || room.game_state.gameEnded) return;
+    if (room.game_state.currentTurn !== myId) return;
+    if (room.game_state.centerPile.some((tc) => tc.playerId === myId)) return;
     await get().executePlay(myId, card);
   },
 
   playBotTurn: async (botPlayer: PlayerRow) => {
     const { room, players } = get();
-    if (!room || room.game_state.gameEnded) return;
+    if (!room || room.status !== 'playing' || room.game_state.gameEnded) return;
+    if (room.game_state.currentTurn !== botPlayer.id) return;
+    if (room.game_state.centerPile.some((tc) => tc.playerId === botPlayer.id)) return;
+
     const freshPlayer = players.find((p) => p.id === botPlayer.id) ?? botPlayer;
     if (!freshPlayer || freshPlayer.cards.length === 0) return;
 
