@@ -1,4 +1,4 @@
-import { applyCardPlay, finalizeTrickResolution } from './gameRules';
+import { applyCardPlay, finalizeTrickResolution, declarePlayerAss } from './gameRules';
 import { Card, emptyGameState, GameState, PlayerRow } from '../types';
 
 function createCard(suit: 'spades' | 'hearts' | 'clubs' | 'diamonds', rank: any): Card {
@@ -253,6 +253,39 @@ console.log('--- Running Game Rules Tests ---');
   assert(!p2F.escaped, 'P2 collected cards, so P2 does not escape');
   assert(final.gameState.currentLeader === 'p2', 'P2 (collector) leads next round');
   console.log('✓ Test 6 Passed: P1 leads with last card, P2 collects hit pile, P1 escapes, P2 leads');
+}
+
+// Test 7: Final 2 players showdown - P2 declares Ass
+{
+  const p1 = createPlayer('p1', 'Player 1', 0, [createCard('hearts', 'K')]);
+  const p2 = createPlayer('p2', 'Player 2', 1, [createCard('spades', '2'), createCard('clubs', '3')]);
+  const p3 = { ...createPlayer('p3', 'Player 3', 2, []), escaped: true, escape_rank: 1 };
+  const p4 = { ...createPlayer('p4', 'Player 4', 3, []), escaped: true, escape_rank: 2 };
+
+  let players = [p1, p2, p3, p4];
+  let gs: GameState = {
+    ...emptyGameState(),
+    gameStarted: true,
+    roundNumber: 8,
+    rankings: ['p3', 'p4'],
+    currentLeader: 'p1',
+    currentTurn: 'p1',
+  };
+
+  const res = declarePlayerAss(players, gs, 'p2');
+  assert(res.gameEnded, 'Game should end immediately');
+  assert(res.gameState.donkeyPlayerId === 'p2', 'P2 should be the donkey');
+
+  const p1F = res.players.find(p => p.id === 'p1')!;
+  const p2F = res.players.find(p => p.id === 'p2')!;
+  assert(p1F.escaped && p1F.escape_rank === 3, 'P1 should escape in 3rd place');
+  assert(!p2F.escaped, 'P2 is the donkey, not escaped');
+  assert(
+    JSON.stringify(res.gameState.rankings) === JSON.stringify(['p3', 'p4', 'p1', 'p2']),
+    'Rankings should order P1 then P2 as last'
+  );
+  assert(res.gameState.lastEvent?.type === 'game_over', 'Game over event emitted');
+  console.log('✓ Test 7 Passed: Final 2 player Ass button ends game and crowns donkey');
 }
 
 console.log('--- All Game Rules Tests Passed Successfully! ---');

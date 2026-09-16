@@ -37,9 +37,9 @@ export default function CenterPile({
   const hasPreviousCards = !hasCurrentCards && lastRoundPile.length > 0;
 
   return (
-    <div className="absolute left-1/2 top-[46%] -translate-x-1/2 -translate-y-1/2 flex items-center justify-center pointer-events-none w-[56%] sm:w-[48%] md:w-[40%] max-w-[215px] sm:max-w-xs md:max-w-sm z-0">
+    <div className="absolute left-1/2 top-[46%] -translate-x-1/2 -translate-y-1/2 flex items-center justify-center pointer-events-none w-[64%] sm:w-[48%] md:w-[40%] max-w-[240px] sm:max-w-xs md:max-w-sm z-10">
       <div
-        className={`transition-all duration-300 pointer-events-auto rounded-2xl sm:rounded-3xl bg-slate-950/85 border backdrop-blur-md shadow-2xl p-2 sm:p-3.5 flex flex-col items-center justify-center w-full min-h-[115px] sm:min-h-[145px] ${
+        className={`transition-all duration-300 pointer-events-auto rounded-2xl sm:rounded-3xl bg-slate-950/85 border backdrop-blur-md shadow-2xl p-2 sm:p-3.5 flex flex-col items-center justify-center w-full min-h-[110px] sm:min-h-[145px] ${
           isMyTurn
             ? 'border-sky-400/60 ring-2 ring-sky-400/30 shadow-[0_0_25px_rgba(56,189,248,0.25)]'
             : 'border-white/10'

@@ -5,7 +5,7 @@ import SuitIcon from '../common/SuitIcon';
 interface Props {
   card?: Card;
   faceDown?: boolean;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'compact';
   selected?: boolean;
   floating?: boolean;
   floatDelay?: number;
@@ -21,12 +21,14 @@ interface Props {
 const SIZES = {
   sm: 'w-8 h-11 text-[9px]',
   md: 'w-10 h-14 text-[10px] sm:w-12 sm:h-16 sm:text-xs',
+  compact: 'w-[42px] h-[62px] text-[10px] sm:w-16 sm:h-[5.5rem] sm:text-sm',
   lg: 'w-13 h-[4.75rem] text-xs sm:w-16 sm:h-[5.5rem] sm:text-sm',
 };
 
 const ICON_SIZES = {
   sm: 'w-2.5 h-2.5',
   md: 'w-3.5 h-3.5 sm:w-4 sm:h-4',
+  compact: 'w-3 h-3 sm:w-5 sm:h-5',
   lg: 'w-4 h-4 sm:w-5 sm:h-5',
 };
 
@@ -73,6 +75,8 @@ export default function PlayingCard({
       }
     : { y: 0, scale: 1 };
 
+  const isCornerMode = size === 'lg' || size === 'compact';
+
   return (
     <motion.div
       drag={draggable ? 'y' : false}
@@ -89,7 +93,7 @@ export default function PlayingCard({
       onDragEnd={onDragEnd}
       onClick={onClick}
       animate={animateValues}
-      whileHover={draggable ? { y: -12, scale: 1.04 } : onClick ? { y: -14, scale: 1.04 } : undefined}
+      whileHover={draggable ? { y: -16, scale: 1.05 } : onClick ? { y: -16, scale: 1.05 } : undefined}
       whileTap={{ scale: 0.96 }}
       transition={selected ? { type: 'spring', stiffness: 400, damping: 25 } : undefined}
       style={{
@@ -97,18 +101,31 @@ export default function PlayingCard({
         touchAction: draggable ? 'pan-x' : 'auto',
       }}
       className={`${SIZES[size]} rounded-md sm:rounded-lg bg-white border-2 ${theme.borderClass} shadow-md flex flex-col ${
-        size === 'lg'
-          ? 'items-start justify-start pl-1 pt-1 sm:items-center sm:justify-center sm:p-0'
+        isCornerMode
+          ? 'items-start justify-start p-1 sm:p-1.5'
           : 'items-center justify-center'
-      } font-display font-black select-none shrink-0
+      } font-display font-black select-none shrink-0 relative
         ${draggable ? 'cursor-grab active:cursor-grabbing' : onClick ? 'cursor-pointer' : 'cursor-default'}
         ${floating ? 'shadow-lg shadow-sky-950/40 ring-2 ring-sky-400/80' : ''}
         ${selected ? 'ring-2 ring-sky-400 shadow-xl' : ''}
         ${glow ? 'ring-2 ring-emerald-400' : ''}
+        hover:z-40 transition-shadow
         ${theme.textClass} ${className}`}
     >
-      <div className={`flex flex-col ${size === 'lg' ? 'items-center pl-0.5 sm:pl-0 sm:items-center' : 'items-center'}`}>
-        <span className="leading-tight text-xs sm:text-sm font-extrabold">{card.rank}</span>
+      <div className={`flex flex-col ${isCornerMode ? 'items-center pl-0.5' : 'items-center'}`}>
+        <span
+          className={`leading-none font-black tracking-tight ${
+            size === 'compact'
+              ? 'text-[10px] sm:text-xs'
+              : size === 'sm'
+              ? 'text-[9px]'
+              : size === 'md'
+              ? 'text-[10px] sm:text-xs'
+              : 'text-xs sm:text-sm'
+          }`}
+        >
+          {card.rank}
+        </span>
         <SuitIcon suit={card.suit} className={`${ICON_SIZES[size]} mt-0.5`} />
       </div>
     </motion.div>

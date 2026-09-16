@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { Card, PlayerRow, RoomRow, CardRequest } from '../types';
-import { applyCardPlay, finalizeTrickResolution, startGameDeal, applyCardTransfer } from '../engine/gameRules';
+import { applyCardPlay, finalizeTrickResolution, startGameDeal, applyCardTransfer, declarePlayerAss } from '../engine/gameRules';
 import { chooseBotCard, isBot } from '../engine/bot';
 import {
   addBotPlayers,
@@ -70,6 +70,7 @@ interface GameStore {
   requestAllCards: (targetPlayerId: string) => Promise<void>;
   acceptCardRequest: () => Promise<void>;
   declineCardRequest: () => Promise<void>;
+  declareAss: () => Promise<void>;
   me: () => PlayerRow | null;
 }
 
@@ -582,5 +583,39 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
 
     await updateGameState(room.id, newGameState);
+  },
+
+  declareAss: async () => {
+    const { myId, room, players } = get();
+    if (!myId || !room || room.status !== 'playing' || room.game_state.gameEnded) return;
+    const activeRemaining = players.filter((p) => !p.escaped && p.cards.length > 0);
+    if (activeRemaining.length !== 2) return;
+    if (!activeRemaining.some((p) => p.id === myId)) return;
+
+    try {
+      const result = declarePlayerAss(players, room.game_state, myId);
+
+      // Optimistic local update
+      set({
+        players: result.players,
+        room: { ...room, status: 'ended', game_state: result.gameState },
+      });
+
+      // Background DB sync
+      const changed = result.players.filter((p) => {
+        const orig = players.find((o) => o.id === p.id);
+        return orig && (orig.escaped !== p.escaped || orig.escape_rank !== p.escape_rank);
+      });
+
+      await Promise.all(
+        changed.map((p) =>
+          updatePlayer(p.id, { escaped: p.escaped, escape_rank: p.escape_rank })
+        )
+      );
+      await updateGameState(room.id, result.gameState);
+      await updateRoom(room.id, { status: 'ended' });
+    } catch (err) {
+      console.error('Failed to declare Ass:', err);
+    }
   },
 }));

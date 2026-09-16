@@ -34,22 +34,59 @@ export default function CardHand({ hand, leadSuit, isMyTurn, onPlay, escaped }: 
   const sortedHand = useMemo(() => sortHand(hand), [hand]);
   const legal = isMyTurn ? legalCardIds(sortedHand, leadSuit) : new Set<string>();
   const [isDragging, setIsDragging] = useState(false);
-  const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const setToast = useGameStore((s) => s.setToast);
   const isMobile = useIsMobile(640);
 
-  // Calibrated for 13 cards maximum on mobile with clean breathing room and generous exposed card strips
-  const overlapClass =
-    sortedHand.length >= 12
+  // Multi-row configuration:
+  // Mobile: splits into 13 cards per row when hand > 13
+  // Desktop: splits into 26 cards per row when hand > 26
+  const isMultiRow = isMobile ? sortedHand.length > 13 : sortedHand.length > 26;
+  const chunkSize = isMobile ? 13 : 26;
+
+  // Split sorted cards into chunks for multi-row display
+  const cardRows = useMemo(() => {
+    if (!isMultiRow) {
+      return [sortedHand];
+    }
+    const rows: Card[][] = [];
+    for (let i = 0; i < sortedHand.length; i += chunkSize) {
+      rows.push(sortedHand.slice(i, i + chunkSize));
+    }
+    return rows;
+  }, [sortedHand, isMultiRow, chunkSize]);
+
+  // Overlap per row on mobile multi-row based on card count in row
+  const getMobileRowOverlapClass = (count: number) => {
+    if (count >= 12) return '-space-x-[20px]';
+    if (count >= 9) return '-space-x-[16px]';
+    if (count >= 6) return '-space-x-3.5';
+    if (count >= 3) return '-space-x-3';
+    return '-space-x-2';
+  };
+
+  // Overlap per row on desktop multi-row based on card count in row
+  const getDesktopRowOverlapClass = (count: number) => {
+    if (count >= 24) return 'sm:-space-x-[34px]';
+    if (count >= 18) return 'sm:-space-x-[28px]';
+    if (count >= 12) return 'sm:-space-x-7';
+    if (count >= 6) return 'sm:-space-x-5';
+    if (count >= 3) return 'sm:-space-x-4';
+    return 'sm:-space-x-3';
+  };
+
+  // Standard overlap for single-row layouts (Mobile <= 13, Desktop <= 26)
+  const defaultOverlapClass =
+    sortedHand.length >= 24
+      ? '-space-x-[34px] sm:-space-x-[32px]'
+      : sortedHand.length >= 18
+      ? '-space-x-[28px] sm:-space-x-6'
+      : sortedHand.length >= 12
       ? '-space-x-[25px] sm:-space-x-4'
       : sortedHand.length >= 9
       ? '-space-x-[21px] sm:-space-x-3'
       : sortedHand.length >= 6
       ? '-space-x-4 sm:-space-x-3'
       : '-space-x-2 sm:-space-x-2';
-
-  // Inverted U arch layout applies strictly to mobile view when player has > 13 cards
-  const isMobileArch = isMobile && sortedHand.length > 13;
 
   const handleCardClick = (card: Card) => {
     if (!isMyTurn) return;
@@ -60,18 +97,16 @@ export default function CardHand({ hand, leadSuit, isMyTurn, onPlay, escaped }: 
     }
   };
 
-  const cardCount = sortedHand.length;
-  // Adaptive scaling so 14 to 26+ cards fit comfortably without index occlusion
-  const cardScale = Math.max(0.78, Math.min(1, 1 - (cardCount - 13) * 0.012));
-
   return (
     <div
-      className={`relative w-full pb-3 pt-1.5 safe-bottom transition-colors duration-300 ${
+      className={`relative w-full ${
+        isMultiRow ? 'pb-2 pt-1' : 'pb-3 pt-1.5'
+      } safe-bottom transition-colors duration-300 ${
         isMyTurn ? 'bg-sky-500/10' : ''
       }`}
     >
       {/* Hand status & action prompt */}
-      <div className="flex items-center justify-between px-4 pb-1 text-[11px] sm:text-xs select-none">
+      <div className="flex items-center justify-between px-3 pb-0.5 text-[11px] sm:text-xs select-none">
         <div className="flex items-center gap-1.5 font-bold text-white/75">
           <span className="text-sky-400">Your Hand</span>
           <span className="text-white/40">•</span>
@@ -91,69 +126,56 @@ export default function CardHand({ hand, leadSuit, isMyTurn, onPlay, escaped }: 
       </div>
 
       {/* Cards container */}
-      <div className="w-full px-2 sm:px-6">
-        {/* Mobile Inverted U Arch Layout: active only on mobile when cards > 13 */}
-        {isMobileArch ? (
-          <div className="relative w-full h-[116px] mx-auto select-none overflow-visible py-1 sm:hidden">
-            {sortedHand.map((card, idx) => {
-              const isLegal = legal.has(card.id);
-              const isCardActive = activeCardId === card.id;
-
-              // Normalized curve index: -1.0 (leftmost), 0.0 (center apex), +1.0 (rightmost)
-              const t = cardCount > 1 ? idx / (cardCount - 1) : 0.5;
-              const norm = (t - 0.5) * 2;
-
-              // Percentage-based horizontal distribution across 8% to 92% of container width
-              const leftPercent = 8 + t * 84;
-
-              // Inverted U arch elevation: apex at center (norm = 0), drops down by 24px at the sides
-              const archDrop = Math.pow(norm, 2) * 24;
-
-              // Radial fanning rotation: tilts from -22deg on the left to +22deg on the right
-              const rotation = norm * 22;
+      <div className="w-full px-1.5 sm:px-6">
+        {/* Multi-Row Layout: active on Mobile when > 13 cards, Desktop when > 26 cards */}
+        {isMultiRow ? (
+          <div
+            className={`flex flex-col items-center justify-center ${
+              isMobile ? '-space-y-1.5 py-1' : '-space-y-4 py-2'
+            } w-full select-none`}
+          >
+            {cardRows.map((rowCards, rowIndex) => {
+              const rowOverlap = isMobile
+                ? getMobileRowOverlapClass(rowCards.length)
+                : getDesktopRowOverlapClass(rowCards.length);
 
               return (
                 <div
-                  key={card.id}
-                  className="absolute pointer-events-auto transition-transform duration-200"
-                  style={{
-                    left: `${leftPercent}%`,
-                    bottom: '26px',
-                    transform: `translateX(-50%) translateY(${archDrop - (isCardActive ? 18 : 0)}px) rotate(${rotation}deg) scale(${
-                      isCardActive ? cardScale * 1.12 : cardScale
-                    })`,
-                    transformOrigin: '50% 120%',
-                    zIndex: isCardActive ? 60 : idx + 1,
-                  }}
-                  onMouseEnter={() => setActiveCardId(card.id)}
-                  onMouseLeave={() => setActiveCardId((curr) => (curr === card.id ? null : curr))}
-                  onTouchStart={() => setActiveCardId(card.id)}
-                  onTouchEnd={() => setActiveCardId((curr) => (curr === card.id ? null : curr))}
+                  key={`row-${rowIndex}`}
+                  className={`flex ${rowOverlap} justify-center items-center py-0.5 w-full`}
+                  style={{ zIndex: rowIndex + 1 }}
                 >
-                  <PlayingCard
-                    card={card}
-                    size="lg"
-                    floating={isMyTurn && isLegal}
-                    floatDelay={(idx % 6) * 0.1}
-                    draggable={isMyTurn && isLegal}
-                    onDragStart={() => setIsDragging(true)}
-                    onDragEnd={(_e, info) => {
-                      setIsDragging(false);
-                      if (info.offset.y < -45 || info.velocity.y < -150) {
-                        onPlay(card);
-                      }
-                    }}
-                    onClick={() => handleCardClick(card)}
-                    className="shrink-0 shadow-md"
-                  />
+                  {rowCards.map((card, idx) => {
+                    const isLegal = legal.has(card.id);
+                    const globalIdx = rowIndex * chunkSize + idx;
+                    return (
+                      <PlayingCard
+                        key={card.id}
+                        card={card}
+                        size={isMobile ? 'compact' : 'lg'}
+                        floating={isMyTurn && isLegal}
+                        floatDelay={(globalIdx % 6) * 0.1}
+                        draggable={isMyTurn && isLegal}
+                        onDragStart={() => setIsDragging(true)}
+                        onDragEnd={(_e, info) => {
+                          setIsDragging(false);
+                          if (info.offset.y < -45 || info.velocity.y < -150) {
+                            onPlay(card);
+                          }
+                        }}
+                        onClick={() => handleCardClick(card)}
+                        className="shrink-0 transition-transform hover:z-50 focus:z-50"
+                      />
+                    );
+                  })}
                 </div>
               );
             })}
           </div>
         ) : (
-          /* Standard Row Layout: used on desktop for all counts, and on mobile for <= 13 cards */
+          /* Standard Row Layout: used on desktop for <= 26 cards, and on mobile for <= 13 cards */
           <div
-            className={`flex ${overlapClass} overflow-x-auto max-w-full scrollbar-none py-2.5 px-3 justify-center items-end`}
+            className={`flex ${defaultOverlapClass} overflow-x-auto max-w-full scrollbar-none py-2.5 px-3 justify-center items-end`}
             style={{ WebkitOverflowScrolling: 'touch' }}
           >
             {sortedHand.map((card, idx) => {

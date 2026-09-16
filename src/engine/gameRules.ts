@@ -548,3 +548,55 @@ export function applyCardTransfer(
 
   return { players: updated, gameState: newGameState, gameEnded };
 }
+
+/**
+ * Concedes the final duel: when exactly 2 players remain, the active player who calls this
+ * accepts that they are the Ass (Donkey). The other remaining active player escapes,
+ * and the game ends immediately.
+ */
+export function declarePlayerAss(
+  players: PlayerRow[],
+  gameState: GameState,
+  assPlayerId: string
+): ApplyPlayResult {
+  const assPlayer = players.find((p) => p.id === assPlayerId);
+  if (!assPlayer) throw new Error('Player not found');
+
+  const stillActive = players.filter(isActivePlayer);
+  const otherActive = stillActive.filter((p) => p.id !== assPlayerId);
+
+  let rankings = [...gameState.rankings];
+  let updated = [...players];
+
+  for (const other of otherActive) {
+    rankings.push(other.id);
+    updated = updated.map((p) =>
+      p.id === other.id
+        ? { ...p, escaped: true, escape_rank: rankings.length }
+        : p
+    );
+  }
+
+  const finalRankings = [...rankings, assPlayerId];
+
+  const newGameState: GameState = {
+    ...gameState,
+    gameEnded: true,
+    donkeyPlayerId: assPlayerId,
+    currentLeader: null,
+    currentTurn: null,
+    rankings: finalRankings,
+    lastEvent: {
+      type: 'game_over',
+      donkeyId: assPlayerId,
+      donkeyName: assPlayer.name,
+    },
+    lastEventAt: Date.now(),
+  };
+
+  return {
+    players: updated,
+    gameState: newGameState,
+    gameEnded: true,
+  };
+}

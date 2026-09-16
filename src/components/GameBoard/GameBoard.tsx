@@ -53,9 +53,11 @@ export default function GameBoard() {
   const requestAllCards = useGameStore((s) => s.requestAllCards);
   const acceptCardRequest = useGameStore((s) => s.acceptCardRequest);
   const declineCardRequest = useGameStore((s) => s.declineCardRequest);
+  const declareAss = useGameStore((s) => s.declareAss);
   const setToast = useGameStore((s) => s.setToast);
 
   const [selectedTarget, setSelectedTarget] = useState<PlayerRow | null>(null);
+  const [showAssConfirm, setShowAssConfirm] = useState(false);
 
   const seated = useMemo(() => [...players].sort((a, b) => a.seat_order - b.seat_order), [players]);
   const me = players.find((p) => p.id === myId);
@@ -89,6 +91,7 @@ export default function GameBoard() {
   const isMyTurn = gs.currentTurn === myId && !hasPlayedThisRound && !gs.gameEnded;
   const activeRemaining = players.filter((p) => !p.escaped && p.cards.length > 0);
   const donkeyCandidateId = activeRemaining.length === 1 ? activeRemaining[0].id : null;
+  const isFinalTwo = activeRemaining.length === 2 && !me.escaped && !gs.gameEnded && activeRemaining.some((p) => p.id === myId);
 
   return (
     <div className="gradient-purple-blue h-[100dvh] min-h-[100dvh] w-full flex flex-col justify-between relative overflow-hidden select-none">
@@ -109,14 +112,25 @@ export default function GameBoard() {
           <span className="text-sky-300 font-bold">Round {gs.roundNumber}</span>
         </div>
 
-        {/* Top right empty placeholder */}
-        <div className="w-7 h-7 sm:w-8 sm:h-8" />
+        {/* Top right: Ass button (shown only during final 2-player showdown) */}
+        {isFinalTwo ? (
+          <button
+            onClick={() => setShowAssConfirm(true)}
+            className="px-2.5 py-1 rounded-full bg-gradient-to-r from-red-600 via-rose-600 to-red-700 hover:from-red-500 hover:to-rose-500 text-white font-extrabold text-[11px] sm:text-xs shadow-[0_0_12px_rgba(225,29,72,0.6)] border border-rose-400/50 flex items-center gap-1 active:scale-95 transition-all animate-pulse"
+            title="Declare yourself as Ass"
+          >
+            <span>🫏</span>
+            <span className="tracking-wide uppercase">Ass</span>
+          </button>
+        ) : (
+          <div className="w-7 h-7 sm:w-8 sm:h-8" />
+        )}
       </div>
 
       <EventBanner event={gs.lastEvent} at={gs.lastEventAt} />
 
       {/* Table Arena: Anticlockwise Circular Seating around Center Discard Tray */}
-      <div className="relative flex-1 w-full min-h-[280px] sm:min-h-[350px] overflow-hidden">
+      <div className="relative flex-1 w-full min-h-[240px] sm:min-h-[350px] overflow-hidden">
         {/* Subtle Oval Table Felt Outline */}
         <div className="absolute left-1/2 top-[46%] -translate-x-1/2 -translate-y-1/2 w-[76%] sm:w-[78%] h-[74%] sm:h-[76%] rounded-[48%] border border-cyan-500/15 bg-radial from-slate-900/20 to-slate-950/60 pointer-events-none -z-0 shadow-[inset_0_0_40px_rgba(14,165,233,0.06)]" />
 
@@ -239,6 +253,41 @@ export default function GameBoard() {
         onAcceptRequest={acceptCardRequest}
         onDeclineRequest={declineCardRequest}
       />
+
+      {/* Ass Declaration Confirmation Modal */}
+      {showAssConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9, y: 15 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="glass relative w-full max-w-xs rounded-2xl p-5 text-center border border-red-500/40 shadow-2xl shadow-red-950/60"
+          >
+            <div className="text-3xl mb-1.5">🫏</div>
+            <h3 className="font-display font-extrabold text-lg text-white">Accept Being the Ass?</h3>
+            <p className="text-white/70 text-xs mt-1.5 leading-relaxed">
+              If you click <span className="text-red-400 font-bold">Ass</span>, you surrender the match, the other player escapes, and you become the Donkey!
+            </p>
+
+            <div className="mt-5 flex gap-2.5">
+              <button
+                onClick={() => setShowAssConfirm(false)}
+                className="flex-1 py-2 rounded-xl text-xs font-bold text-white/80 bg-white/10 hover:bg-white/15 active:scale-95 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowAssConfirm(false);
+                  declareAss();
+                }}
+                className="flex-1 py-2 rounded-xl text-xs font-extrabold text-white bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 shadow-lg shadow-red-600/40 active:scale-95 transition-all"
+              >
+                Yes, I am Ass
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }
