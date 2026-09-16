@@ -66,13 +66,8 @@ export default function GameBoard() {
     return idx >= 0 ? idx : 0;
   }, [seated, myId]);
 
-  if (!room || !me) return null;
-  const gs = room.game_state;
-  const hasPlayedThisRound = gs.centerPile.some((tc) => tc.playerId === myId);
-  const isMyTurn = gs.currentTurn === myId && !hasPlayedThisRound && !gs.gameEnded;
-
-  // A round is actively in progress in the center if cards have been played
-  const isRoundActive = gs.centerPile.length > 0;
+  const gs = room?.game_state;
+  const isRoundActive = (gs?.centerPile.length ?? 0) > 0;
 
   // If a card is played while target menu is open, immediately close target menu
   useEffect(() => {
@@ -81,13 +76,19 @@ export default function GameBoard() {
     }
   }, [isRoundActive, selectedTarget]);
 
-  const activeRemaining = players.filter((p) => !p.escaped && p.cards.length > 0);
-  const donkeyCandidateId = activeRemaining.length === 1 ? activeRemaining[0].id : null;
-
   // Automated bot turns managed by store orchestrator — fast, robust, no hanging
   useEffect(() => {
-    triggerBotTurnIfNeeded(useGameStore.getState);
-  }, [gs.currentTurn, gs.roundNumber, gs.centerPile.length, gs.gameEnded, me.is_host]);
+    if (room && me) {
+      triggerBotTurnIfNeeded(useGameStore.getState);
+    }
+  }, [gs?.currentTurn, gs?.roundNumber, gs?.centerPile.length, gs?.gameEnded, me?.is_host, room, me]);
+
+  if (!room || !me || !gs) return null;
+
+  const hasPlayedThisRound = gs.centerPile.some((tc) => tc.playerId === myId);
+  const isMyTurn = gs.currentTurn === myId && !hasPlayedThisRound && !gs.gameEnded;
+  const activeRemaining = players.filter((p) => !p.escaped && p.cards.length > 0);
+  const donkeyCandidateId = activeRemaining.length === 1 ? activeRemaining[0].id : null;
 
   return (
     <div className="gradient-purple-blue h-[100dvh] min-h-[100dvh] w-full flex flex-col justify-between relative overflow-hidden select-none">
@@ -207,7 +208,13 @@ export default function GameBoard() {
           isMyTurn ? 'border-t-2 border-sky-400/50 shadow-[0_-8px_30px_rgba(56,189,248,0.2)]' : ''
         }`}
       >
-        <CardHand hand={me.cards} leadSuit={gs.leadSuit} isMyTurn={isMyTurn} onPlay={playCard} />
+        <CardHand
+          hand={me.cards}
+          leadSuit={gs.leadSuit}
+          isMyTurn={isMyTurn}
+          onPlay={playCard}
+          escaped={me.escaped}
+        />
       </div>
 
       {gs.gameEnded && (

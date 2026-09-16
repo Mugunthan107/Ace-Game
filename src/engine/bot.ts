@@ -1,5 +1,5 @@
 import { Card, PlayerRow, Suit, TrickCard, rankValue } from '../types';
-import { canPlayCard, findHighestLeadSuit, isActivePlayer } from './gameRules';
+import { canPlayCard, findHighestLeadSuit } from './gameRules';
 
 export const BOT_NAMES = [
   'Bot Alex', 'Bot Charlie', 'Bot Sam', 'Bot Jordan', 'Bot Taylor',
@@ -96,8 +96,8 @@ export function chooseBotCard(
   const isFollowing = playable.some((c) => c.suit === leadSuit);
   if (isFollowing) {
     const leadCards = playable.filter((c) => c.suit === leadSuit);
-    const activePlayersCount = players.length > 0 ? players.filter(isActivePlayer).length : 2;
-    const isLastInTrick = centerPile.length + 1 >= activePlayersCount;
+    const unescapedCount = players.length > 0 ? players.filter((p) => !p.escaped).length : 2;
+    const isLastInTrick = centerPile.length + 1 >= unescapedCount;
 
     // If last to play in the trick, no one can hit behind us!
     // We can safely shed our highest lead card without fear of taking a hit!

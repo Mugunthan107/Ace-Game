@@ -152,7 +152,7 @@ export function findNextTrickPlayer(
 
   for (let step = 1; step <= n; step++) {
     const candidate = sorted[(startIdx + step) % n];
-    if (isActivePlayer(candidate) && !playedIds.has(candidate.id)) {
+    if (!candidate.escaped && candidate.cards.length > 0 && !playedIds.has(candidate.id)) {
       return candidate;
     }
   }
@@ -228,16 +228,17 @@ export function applyCardPlay(
   const centerPile = [...gameState.centerPile, trickCard];
   const isHitPlay = !wasLeadingPlay && card.suit !== gameState.leadSuit;
 
-  const activePlayers = updated.filter(isActivePlayer);
-  const activeCount = activePlayers.length;
+  // Total unescaped players expected to play in this trick
+  const unescapedPlayers = updated.filter((p) => !p.escaped);
+  const trickParticipantsCount = unescapedPlayers.length;
 
   // Find the next active player who hasn't put a card in this round yet
   const nextPlayer = isHitPlay ? null : findNextTrickPlayer(updated, actor.id, centerPile);
 
   // Trick finishes if:
   // - A hit occurred (someone broke the lead suit)
-  // - OR all active players have placed their 1 card (centerPile.length >= activeCount or nextPlayer === null)
-  const isTrickComplete = isHitPlay || !nextPlayer || centerPile.length >= activeCount;
+  // - OR all unescaped players have placed their 1 card (centerPile.length >= trickParticipantsCount or nextPlayer === null)
+  const isTrickComplete = isHitPlay || !nextPlayer || centerPile.length >= trickParticipantsCount;
 
   if (isTrickComplete) {
     const resolution = resolveTrick(centerPile, leadSuit);
@@ -326,32 +327,80 @@ export function finalizeTrickResolution(
   // The hit event was already emitted once in step 1 when the card was played.
   const events: GameEvent[] = [];
   let rankings = [...gameState.rankings];
-  let leaderCandidateId: string = resolution.collectorId;
+  let leaderCandidateId: string | null = null;
 
-  // Walk the leadership chain, escaping any zero-card candidate as we go.
-  let guard = 0;
-  while (guard++ < 30) {
-    const candidate = updated.find((p) => p.id === leaderCandidateId);
-    if (!candidate) break;
-    if (candidate.cards.length > 0) break;
-    updated = updated.map((p) =>
-      p.id === candidate.id ? { ...p, escaped: true, escape_rank: rankings.length + 1 } : p
-    );
-    rankings.push(candidate.id);
-    events.push({ type: 'escaped', playerId: candidate.id, playerName: candidate.name, place: rankings.length });
-    const next = findNextActivePlayer(updated, candidate.id);
-    if (!next) break;
-    leaderCandidateId = next.id;
-  }
+  if (resolution.wasHit) {
+    // In a hit round, the collector always took cards into hand, so they have cards and lead next.
+    leaderCandidateId = resolution.collectorId;
 
-  // Sweep any straggler left at zero cards
-  for (const p of updated) {
-    if (!p.escaped && p.cards.length === 0) {
-      updated = updated.map((x) =>
-        x.id === p.id ? { ...x, escaped: true, escape_rank: rankings.length + 1 } : x
-      );
-      rankings.push(p.id);
-      events.push({ type: 'escaped', playerId: p.id, playerName: p.name, place: rankings.length });
+    // Any other player in the trick (or at the table) who has 0 cards escapes!
+    for (const p of updated) {
+      if (!p.escaped && p.cards.length === 0) {
+        updated = updated.map((x) =>
+          x.id === p.id ? { ...x, escaped: true, escape_rank: rankings.length + 1 } : x
+        );
+        rankings.push(p.id);
+        events.push({
+          type: 'escaped',
+          playerId: p.id,
+          playerName: p.name,
+          place: rankings.length,
+        });
+      }
+    }
+  } else {
+    // Clean round:
+    // Order the players who played in this trick by their lead-suit card rank descending (highest to lowest).
+    const leadSuit = gameState.leadSuit;
+    const sortedTrickCards = [...gameState.centerPile]
+      .filter((tc) => !leadSuit || tc.card.suit === leadSuit)
+      .sort((a, b) => rankValue(b.card.rank) - rankValue(a.card.rank));
+
+    // Process players from this trick in descending rank order:
+    // If a player has 0 cards, they escape in this priority order.
+    // The highest-ranked player who STILL has cards will lead the next round!
+    for (const tc of sortedTrickCards) {
+      const p = updated.find((x) => x.id === tc.playerId);
+      if (!p) continue;
+      if (!p.escaped && p.cards.length === 0) {
+        updated = updated.map((x) =>
+          x.id === p.id ? { ...x, escaped: true, escape_rank: rankings.length + 1 } : x
+        );
+        rankings.push(p.id);
+        events.push({
+          type: 'escaped',
+          playerId: p.id,
+          playerName: p.name,
+          place: rankings.length,
+        });
+      } else if (!p.escaped && p.cards.length > 0 && !leaderCandidateId) {
+        leaderCandidateId = p.id;
+      }
+    }
+
+    // Sweep any other unescaped player who somehow has 0 cards
+    for (const p of updated) {
+      if (!p.escaped && p.cards.length === 0) {
+        updated = updated.map((x) =>
+          x.id === p.id ? { ...x, escaped: true, escape_rank: rankings.length + 1 } : x
+        );
+        rankings.push(p.id);
+        events.push({
+          type: 'escaped',
+          playerId: p.id,
+          playerName: p.name,
+          place: rankings.length,
+        });
+      }
+    }
+
+    // If all trick players escaped, fallback to find next active player clockwise
+    if (!leaderCandidateId) {
+      const nextActive =
+        findNextActivePlayer(updated, resolution.collectorId) ?? findNextActivePlayer(updated, 0);
+      if (nextActive) {
+        leaderCandidateId = nextActive.id;
+      }
     }
   }
 

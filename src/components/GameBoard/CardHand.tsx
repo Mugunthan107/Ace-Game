@@ -10,6 +10,7 @@ interface Props {
   leadSuit: Suit | null;
   isMyTurn: boolean;
   onPlay: (card: Card) => void;
+  escaped?: boolean;
 }
 
 function useIsMobile(breakpoint = 640) {
@@ -28,7 +29,7 @@ function useIsMobile(breakpoint = 640) {
   return isMobile;
 }
 
-export default function CardHand({ hand, leadSuit, isMyTurn, onPlay }: Props) {
+export default function CardHand({ hand, leadSuit, isMyTurn, onPlay, escaped }: Props) {
   // Always sort and group hand cards: Spades, Hearts, Clubs, Diamonds; within suit A -> 2
   const sortedHand = useMemo(() => sortHand(hand), [hand]);
   const legal = isMyTurn ? legalCardIds(sortedHand, leadSuit) : new Set<string>();
@@ -179,9 +180,18 @@ export default function CardHand({ hand, leadSuit, isMyTurn, onPlay }: Props) {
             })}
 
             {sortedHand.length === 0 && (
-              <div className="py-4 text-center w-full flex items-center justify-center gap-2 text-emerald-400 font-bold text-sm">
-                <span>🏆</span>
-                <span>All cards cleared — you escaped!</span>
+              <div className="py-4 text-center w-full flex items-center justify-center gap-2 font-bold text-sm">
+                {escaped ? (
+                  <>
+                    <span>🏆</span>
+                    <span className="text-emerald-400">All cards cleared — you escaped!</span>
+                  </>
+                ) : (
+                  <>
+                    <span>⏳</span>
+                    <span className="text-sky-300 animate-pulse">Card played — waiting for round result...</span>
+                  </>
+                )}
               </div>
             )}
           </div>
