@@ -1,8 +1,10 @@
 import { motion } from 'framer-motion';
 import { GiCrown, GiDonkey } from 'react-icons/gi';
 import { HiOutlineTrophy } from 'react-icons/hi2';
+import { IoMicOff } from 'react-icons/io5';
 import { PlayerRow } from '../../types';
 import { isBot } from '../../engine/bot';
+import { useVoiceStore } from '../../store/voiceStore';
 
 interface Props {
   player: PlayerRow;
@@ -24,6 +26,13 @@ export default function PlayerSeat({
   onClick,
 }: Props) {
   const isCrowded = totalPlayers >= 7;
+
+  const myIsSpeaking = useVoiceStore((s) => s.isSpeaking);
+  const myIsMuted = useVoiceStore((s) => s.isMuted);
+  const peerVoice = useVoiceStore((s) => s.peers[player.id]);
+
+  const isPlayerSpeaking = !isBot(player) && (isMe ? myIsSpeaking : peerVoice?.isSpeaking ?? false);
+  const isPlayerMuted = !isBot(player) && (isMe ? myIsMuted : peerVoice?.isMuted ?? false);
 
   return (
     <div
@@ -84,6 +93,21 @@ export default function PlayerSeat({
               title="Bot"
             >
               🤖
+            </span>
+          )}
+
+          {/* Voice: Speaking wave ping */}
+          {isPlayerSpeaking && (
+            <span className="absolute -inset-1.5 rounded-full border-2 border-emerald-400 animate-ping pointer-events-none" />
+          )}
+
+          {/* Voice: Muted microphone badge */}
+          {isPlayerMuted && (
+            <span
+              className="absolute -bottom-1 -left-1 w-3.5 h-3.5 sm:w-4.5 sm:h-4.5 rounded-full bg-rose-600 text-white flex items-center justify-center text-[7px] sm:text-[8px] shadow border border-white/50 z-20"
+              title="Muted"
+            >
+              <IoMicOff />
             </span>
           )}
 

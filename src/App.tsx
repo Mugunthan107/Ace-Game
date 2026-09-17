@@ -7,6 +7,7 @@ import WaitingRoom from './components/WaitingRoom';
 import GameBoard from './components/GameBoard/GameBoard';
 import LoadingScreen from './components/common/LoadingScreen';
 import ToastHost from './components/common/ToastHost';
+import VoiceWidget from './components/common/VoiceWidget';
 
 export default function App() {
   const view = useGameStore((s) => s.view);
@@ -34,6 +35,7 @@ export default function App() {
   return (
     <div className="min-h-screen w-full">
       {content}
+      {view === 'game' && room && <VoiceWidget />}
       <ToastHost />
     </div>
   );
