@@ -19,6 +19,12 @@ export type VoiceStateListener = (state: {
   error: string | null;
 }) => void;
 
+/**
+ * Robust ICE Configuration: Includes Google STUN + OpenRelay TURN servers
+ * (UDP & TCP on ports 80/443).
+ * TURN is essential for mobile cellular networks (4G/5G), mobile hotspots,
+ * and restrictive home/office NAT firewalls.
+ */
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -26,7 +32,24 @@ const ICE_SERVERS: RTCConfiguration = {
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:openrelay.metered.ca:80' },
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelay',
+      credential: 'openrelay',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelay',
+      credential: 'openrelay',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelay',
+      credential: 'openrelay',
+    },
   ],
+  iceCandidatePoolSize: 10,
 };
 
 class VoiceChatManager {
@@ -40,6 +63,7 @@ class VoiceChatManager {
   private peerConnections: Map<string, RTCPeerConnection> = new Map();
   private remoteAudioElements: Map<string, HTMLAudioElement> = new Map();
   private pendingIceCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
+  private negotiatingPeers: Set<string> = new Set();
 
   private isMuted: boolean = true;
   private isDeafened: boolean = false;
@@ -59,9 +83,9 @@ class VoiceChatManager {
   }
 
   /**
-   * Browser autoplay policy requires an explicit user interaction (click, touch, tap)
-   * to unlock audio playback. This listener ensures that as soon as the user touches
-   * or clicks anywhere on the game, all pending and active remote audio streams play loudly and clearly.
+   * Browser autoplay policy requires an explicit user gesture (click, tap)
+   * to unlock audio playback. This listener ensures that any screen tap
+   * immediately unblocks and plays all remote participant audio streams.
    */
   private setupAutoplayUnlocker() {
     if (typeof window === 'undefined') return;
@@ -118,9 +142,9 @@ class VoiceChatManager {
   }
 
   /**
-   * Dedicated DOM container for remote audio elements.
-   * Rendered with minimal dimensions and 0.01 opacity in the viewport
-   * so iOS and Android power managers never throttle or pause audio decoding.
+   * Live DOM container for remote audio elements.
+   * Rendered with minimal size and 0.01 opacity in the viewport
+   * so mobile operating systems never suspend or throttle audio.
    */
   private getAudioContainer(): HTMLElement {
     let container = document.getElementById('game-voice-audio-container');
@@ -160,15 +184,16 @@ class VoiceChatManager {
   }
 
   /**
-   * Captures microphone stream. If forcePrompt is true (e.g. user clicked mic button),
-   * active browser permission prompts will appear. If false (room join background),
-   * it attempts acquisition without showing an error banner if user hasn't clicked yet.
+   * Captures physical microphone stream.
+   * If forcePrompt is true (e.g. user clicked mic button), browser asks for permission.
+   * If false (background setup on room join), attempts silent acquisition if allowed.
    */
   public async requestSystemPermissions(forcePrompt: boolean = false): Promise<boolean> {
     try {
       if (!navigator?.mediaDevices?.getUserMedia) {
         if (forcePrompt) {
-          this.error = 'Microphone API is not supported on this browser/device.';
+          this.error =
+            'Microphone access is unavailable. Please ensure you are accessing via HTTPS or localhost.';
           this.notify();
         }
         return false;
@@ -188,11 +213,15 @@ class VoiceChatManager {
           stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         } catch (err2: any) {
           if (forcePrompt) {
-            console.warn('Microphone permission denied or device unavailable:', err2);
-            this.error =
-              err2?.name === 'NotAllowedError' || err2?.name === 'PermissionDeniedError'
-                ? 'Microphone access was denied. Please click the lock icon in your address bar to allow microphone access.'
-                : 'No microphone found or device is busy. Check your audio settings.';
+            console.warn('Microphone acquisition note:', err2);
+            if (err2?.name === 'NotAllowedError' || err2?.name === 'PermissionDeniedError') {
+              this.error =
+                'Microphone permission denied. Please click the lock icon in your address bar to allow microphone access.';
+            } else {
+              // No physical mic on laptop - inform user that speaker mode is active
+              this.error =
+                'No microphone hardware detected on this computer. Speaker mode is active — you can hear other players.';
+            }
             this.isMuted = true;
             this.notify();
             return false;
@@ -201,7 +230,6 @@ class VoiceChatManager {
       }
 
       if (stream) {
-        // If we previously had a synthetic stream, stop it
         if (this.localStream && !this.isRealMic) {
           this.localStream.getTracks().forEach((t) => t.stop());
         }
@@ -227,8 +255,7 @@ class VoiceChatManager {
         this.notify();
         return true;
       } else {
-        // Fallback for background setup: create synthetic stream to ensure WebRTC SDP
-        // negotiation negotiates the audio transceiver right away.
+        // Fallback placeholder stream so WebRTC SDP includes audio transceiver
         if (!this.localStream) {
           this.localStream = this.createSyntheticAudioStream();
           this.isRealMic = false;
@@ -258,6 +285,7 @@ class VoiceChatManager {
         } else {
           pc.addTrack(newTrack, stream);
           console.log(`[Voice] Added audio track for peer ${peerId}`);
+          await this.createAndSendOffer(peerId, true);
         }
       } catch (e) {
         console.warn(`[Voice] Error updating audio track for peer ${peerId}:`, e);
@@ -293,10 +321,9 @@ class VoiceChatManager {
     this.myId = myId;
     this.myName = myName;
     this.error = null;
-    this.isMuted = true; // Mic starts off by default
-    this.isDeafened = false; // Speaker starts on so you hear everyone
+    this.isMuted = true;
+    this.isDeafened = false;
 
-    // Prepare audio context for speaker output
     this.ensureAudioContext();
 
     // Background microphone acquisition (seamless if previously allowed)
@@ -588,7 +615,6 @@ class VoiceChatManager {
     pc.ontrack = (event) => {
       console.log(`[Voice] Incoming remote audio track from ${peerId}:`, event.track.id);
 
-      // In Unified Plan WebRTC, event.streams can be empty! Wrap track in MediaStream if needed.
       let remoteStream: MediaStream;
       if (event.streams && event.streams[0]) {
         remoteStream = event.streams[0];
@@ -604,19 +630,29 @@ class VoiceChatManager {
       const attemptPlay = () => {
         if (audioEl && !this.isDeafened) {
           audioEl.muted = false;
+          audioEl.volume = 1.0;
           audioEl.play().catch((err) => {
-            console.warn(`[Voice] Autoplay deferred for ${peerId}:`, err?.message || err);
+            console.warn(`[Voice] Autoplay note for ${peerId}:`, err?.message || err);
           });
         }
       };
 
-      // Listen for track un-mute (RTP audio packet arrival)
       event.track.onunmute = () => {
         console.log(`[Voice] Audio track unmuted for ${peerId}`);
         attemptPlay();
       };
 
       attemptPlay();
+    };
+
+    // ICE state monitoring with automatic restart
+    pc.oniceconnectionstatechange = () => {
+      const iceState = pc?.iceConnectionState;
+      console.log(`[Voice] Peer ${peerId} ICE state: ${iceState}`);
+      if (iceState === 'failed') {
+        console.warn(`[Voice] Peer ${peerId} ICE check failed, triggering ICE restart...`);
+        this.restartPeerConnection(peerId);
+      }
     };
 
     // Connection state monitoring
@@ -630,17 +666,45 @@ class VoiceChatManager {
       }
 
       if (cState === 'failed') {
-        this.cleanupPeer(peerId);
+        console.warn(`[Voice] Peer connection failed with ${peerId}, restarting...`);
+        this.restartPeerConnection(peerId);
       }
     };
 
     return pc;
   }
 
-  private async createAndSendOffer(targetPeerId: string) {
+  public async restartPeerConnection(peerId: string) {
+    this.negotiatingPeers.delete(peerId);
+    const pc = this.peerConnections.get(peerId);
+    if (!pc) return;
+
+    try {
+      if (typeof pc.restartIce === 'function') {
+        pc.restartIce();
+      }
+      if (this.myId && this.myId < peerId) {
+        await this.createAndSendOffer(peerId, true);
+      }
+    } catch (e) {
+      console.warn(`[Voice] Error restarting peer connection with ${peerId}:`, e);
+    }
+  }
+
+  private async createAndSendOffer(targetPeerId: string, isRestart: boolean = false) {
+    if (this.negotiatingPeers.has(targetPeerId) && !isRestart) {
+      return;
+    }
+
     try {
       const pc = await this.getOrCreatePeerConnection(targetPeerId);
-      const offer = await pc.createOffer();
+      if (pc.signalingState !== 'stable' && !isRestart) {
+        return;
+      }
+
+      this.negotiatingPeers.add(targetPeerId);
+
+      const offer = await pc.createOffer(isRestart ? { iceRestart: true } : {});
       await pc.setLocalDescription(offer);
 
       if (this.channel && this.myId) {
@@ -656,6 +720,7 @@ class VoiceChatManager {
       }
     } catch (err) {
       console.warn('Error creating WebRTC offer for', targetPeerId, err);
+      this.negotiatingPeers.delete(targetPeerId);
     }
   }
 
@@ -690,6 +755,7 @@ class VoiceChatManager {
   private async handleReceiveAnswer(payload: { from: string; to: string; answer: RTCSessionDescriptionInit }) {
     if (!payload || payload.to !== this.myId) return;
 
+    this.negotiatingPeers.delete(payload.from);
     try {
       const pc = this.peerConnections.get(payload.from);
       if (pc && pc.signalingState === 'have-local-offer') {
@@ -755,6 +821,7 @@ class VoiceChatManager {
   }
 
   private cleanupPeer(peerId: string) {
+    this.negotiatingPeers.delete(peerId);
     const pc = this.peerConnections.get(peerId);
     if (pc) {
       pc.close();
@@ -875,6 +942,7 @@ class VoiceChatManager {
     this.peerConnections.forEach((pc) => pc.close());
     this.peerConnections.clear();
     this.pendingIceCandidates.clear();
+    this.negotiatingPeers.clear();
 
     this.remoteAudioElements.forEach((el) => {
       el.pause();

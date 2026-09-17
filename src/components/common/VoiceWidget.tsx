@@ -27,6 +27,7 @@ export default function VoiceWidget() {
   const leaveVoice = useVoiceStore((s) => s.leaveVoice);
   const toggleMic = useVoiceStore((s) => s.toggleMic);
   const toggleSpeaker = useVoiceStore((s) => s.toggleSpeaker);
+  const reconnectPeer = useVoiceStore((s) => s.reconnectPeer);
 
   const [expanded, setExpanded] = useState(false);
   const [corner, setCorner] = useState<'top-right' | 'bottom-left'>('top-right');
@@ -146,12 +147,28 @@ export default function VoiceWidget() {
           initial={{ opacity: 0, y: -4, scale: 0.95 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -4, scale: 0.95 }}
-          className="mt-2 w-64 sm:w-72 p-3 rounded-2xl bg-rose-950/95 border border-rose-500/50 shadow-[0_8px_32px_rgba(0,0,0,0.6)] backdrop-blur-2xl text-white text-xs flex flex-col gap-2"
+          className={`mt-2 w-64 sm:w-72 p-3 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.6)] backdrop-blur-2xl text-white text-xs flex flex-col gap-2 ${
+            error.includes('Speaker mode is active')
+              ? 'bg-sky-950/95 border border-sky-500/50'
+              : 'bg-rose-950/95 border border-rose-500/50'
+          }`}
         >
           <div className="flex items-start justify-between gap-1.5">
-            <div className="flex items-center gap-1.5 text-rose-300 font-bold text-[11px] sm:text-xs">
-              <HiOutlineLockClosed className="text-sm shrink-0" />
-              <span>Microphone Access Notice</span>
+            <div
+              className={`flex items-center gap-1.5 font-bold text-[11px] sm:text-xs ${
+                error.includes('Speaker mode is active') ? 'text-sky-300' : 'text-rose-300'
+              }`}
+            >
+              {error.includes('Speaker mode is active') ? (
+                <IoVolumeHigh className="text-sm shrink-0 text-sky-400" />
+              ) : (
+                <HiOutlineLockClosed className="text-sm shrink-0" />
+              )}
+              <span>
+                {error.includes('Speaker mode is active')
+                  ? 'Speaker Mode Active'
+                  : 'Microphone Access Notice'}
+              </span>
             </div>
             <button
               onClick={clearError}
@@ -162,21 +179,51 @@ export default function VoiceWidget() {
             </button>
           </div>
 
-          <p className="text-[11px] leading-relaxed text-rose-100/90 font-medium">
+          <p
+            className={`text-[11px] leading-relaxed font-medium ${
+              error.includes('Speaker mode is active') ? 'text-sky-100/90' : 'text-rose-100/90'
+            }`}
+          >
             {error}
           </p>
 
-          <div className="flex items-center justify-between pt-1.5 border-t border-rose-500/30 text-[10px]">
-            <span className="text-rose-300/80 font-semibold">Address bar ➔ 🔒</span>
+          <div
+            className={`flex items-center justify-between pt-1.5 border-t text-[10px] ${
+              error.includes('Speaker mode is active')
+                ? 'border-sky-500/30'
+                : 'border-rose-500/30'
+            }`}
+          >
+            <span
+              className={
+                error.includes('Speaker mode is active')
+                  ? 'text-sky-300/80 font-semibold'
+                  : 'text-rose-300/80 font-semibold'
+              }
+            >
+              {error.includes('Speaker mode is active') ? 'Listening enabled' : 'Address bar ➔ 🔒'}
+            </span>
             <button
               onClick={() => {
                 clearError();
-                toggleMic();
+                if (!error.includes('Speaker mode is active')) {
+                  toggleMic();
+                }
               }}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-bold text-[10px] sm:text-[11px] active:scale-95 shadow transition-all"
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-white font-bold text-[10px] sm:text-[11px] active:scale-95 shadow transition-all ${
+                error.includes('Speaker mode is active')
+                  ? 'bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500'
+                  : 'bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500'
+              }`}
             >
-              <HiOutlineArrowPath className="text-xs" />
-              <span>Ask Again</span>
+              {error.includes('Speaker mode is active') ? (
+                <span>Got it</span>
+              ) : (
+                <>
+                  <HiOutlineArrowPath className="text-xs" />
+                  <span>Ask Again</span>
+                </>
+              )}
             </button>
           </div>
         </motion.div>
@@ -253,10 +300,12 @@ export default function VoiceWidget() {
                 .filter((p) => p.id !== me.id)
                 .map((p) => {
                   const peerState = peers[p.id];
-                  const isPeerConnected = Boolean(peerState);
+                  const cState = peerState?.connectionState;
                   const isPeerSpeaking = peerState?.isSpeaking ?? false;
                   const isPeerMuted = peerState?.isMuted ?? false;
                   const isPeerDeafened = peerState?.isDeafened ?? false;
+                  const isAudioConnected = cState === 'connected';
+                  const isAudioFailed = cState === 'failed';
 
                   return (
                     <div
@@ -279,14 +328,24 @@ export default function VoiceWidget() {
                           <span className="font-medium text-white/90 text-[11px]">
                             {p.name}
                           </span>
-                          <span className="text-[9px] text-white/40">
-                            {!isPeerConnected
-                              ? 'Connecting...'
-                              : isPeerSpeaking
-                              ? 'Speaking...'
-                              : isPeerMuted
-                              ? 'Muted'
-                              : 'Connected'}
+                          <span className="text-[9px]">
+                            {isAudioFailed ? (
+                              <button
+                                onClick={() => reconnectPeer(p.id)}
+                                className="text-rose-400 hover:underline flex items-center gap-0.5 font-bold"
+                                title="Click to reconnect audio"
+                              >
+                                ✕ Reconnect
+                              </button>
+                            ) : !peerState || !isAudioConnected ? (
+                              <span className="text-amber-300/80 font-medium">Connecting...</span>
+                            ) : isPeerSpeaking ? (
+                              <span className="text-emerald-400 font-semibold">Speaking...</span>
+                            ) : isPeerMuted ? (
+                              <span className="text-white/40">Muted</span>
+                            ) : (
+                              <span className="text-sky-300/80 font-medium">● Connected</span>
+                            )}
                           </span>
                         </div>
                       </div>

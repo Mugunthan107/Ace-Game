@@ -14,6 +14,7 @@ interface VoiceStore {
   toggleMic: () => void;
   toggleSpeaker: () => void;
   clearError: () => void;
+  reconnectPeer: (peerId: string) => void;
 }
 
 export const useVoiceStore = create<VoiceStore>((set) => {
@@ -55,6 +56,10 @@ export const useVoiceStore = create<VoiceStore>((set) => {
 
     clearError: () => {
       voiceChat.clearError();
+    },
+
+    reconnectPeer: (peerId: string) => {
+      voiceChat.restartPeerConnection(peerId);
     },
   };
 });
