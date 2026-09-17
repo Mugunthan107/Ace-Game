@@ -2,9 +2,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { HiOutlineClipboard, HiOutlineCheck, HiOutlineShare, HiOutlineX, HiOutlineLogout } from 'react-icons/hi';
 import { GiCrown } from 'react-icons/gi';
-import { IoMicOff } from 'react-icons/io5';
 import { useGameStore } from '../store/gameStore';
-import { useVoiceStore } from '../store/voiceStore';
 import FloatingCards from './common/FloatingCards';
 
 export default function WaitingRoom() {
@@ -18,10 +16,6 @@ export default function WaitingRoom() {
   const setToast = useGameStore((s) => s.setToast);
   const [copied, setCopied] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
-
-  const myIsSpeaking = useVoiceStore((s) => s.isSpeaking);
-  const myIsMuted = useVoiceStore((s) => s.isMuted);
-  const peers = useVoiceStore((s) => s.peers);
 
   if (!room) return null;
   const me = players.find((p) => p.id === myId);
@@ -102,65 +96,41 @@ export default function WaitingRoom() {
 
         <div className="w-full mt-4">
           <div className="grid grid-cols-3 gap-2.5 sm:gap-3">
-            {players.map((p) => {
-              const isPlayerMe = p.id === myId;
-              const isSpeaking = isPlayerMe ? myIsSpeaking : peers[p.id]?.isSpeaking ?? false;
-              const isMuted = isPlayerMe ? myIsMuted : peers[p.id]?.isMuted ?? false;
-
-              return (
-                <motion.div
-                  key={p.id}
-                  initial={{ opacity: 0, scale: 0.85 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="flex flex-col items-center gap-1"
-                >
-                  <div className="relative">
-                    {/* Voice speaking aura */}
-                    {isSpeaking && (
-                      <span className="absolute -inset-1 rounded-full border-2 border-emerald-400 animate-ping pointer-events-none" />
-                    )}
-
-                    <div
-                      className={`w-11 h-11 sm:w-13 sm:h-13 rounded-full flex items-center justify-center font-display font-bold text-white text-base sm:text-lg shadow-md transition-all ${
-                        isSpeaking ? 'ring-2 ring-emerald-400' : ''
-                      }`}
-                      style={{ background: p.avatar_color }}
-                    >
-                      {p.name.slice(0, 1).toUpperCase()}
-                    </div>
-
-                    {/* Muted mic badge */}
-                    {isMuted && (
-                      <span
-                        className="absolute -bottom-1 -left-1 w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center text-[8px] shadow border border-white/50"
-                        title="Microphone muted"
-                      >
-                        <IoMicOff />
-                      </span>
-                    )}
-
-                    {p.is_host && (
-                      <span className="absolute -top-1.5 -right-1 text-amber-300 text-base drop-shadow">
-                        <GiCrown />
-                      </span>
-                    )}
-                    {isHost && p.id !== myId && (
-                      <button
-                        onClick={() => removePlayer(p.id)}
-                        className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center text-[9px] shadow"
-                        aria-label={`Remove ${p.name}`}
-                      >
-                        <HiOutlineX />
-                      </button>
-                    )}
+            {players.map((p) => (
+              <motion.div
+                key={p.id}
+                initial={{ opacity: 0, scale: 0.85 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="flex flex-col items-center gap-1"
+              >
+                <div className="relative">
+                  <div
+                    className="w-11 h-11 sm:w-13 sm:h-13 rounded-full flex items-center justify-center font-display font-bold text-white text-base sm:text-lg shadow-md"
+                    style={{ background: p.avatar_color }}
+                  >
+                    {p.name.slice(0, 1).toUpperCase()}
                   </div>
-                  <p className="text-white text-[11px] font-medium truncate max-w-[70px] text-center leading-tight">
-                    {p.name}
-                    {p.is_host ? ' (Host)' : ''}
-                  </p>
-                </motion.div>
-              );
-            })}
+                  {p.is_host && (
+                    <span className="absolute -top-1.5 -right-1 text-amber-300 text-base drop-shadow">
+                      <GiCrown />
+                    </span>
+                  )}
+                  {isHost && p.id !== myId && (
+                    <button
+                      onClick={() => removePlayer(p.id)}
+                      className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center text-[9px] shadow"
+                      aria-label={`Remove ${p.name}`}
+                    >
+                      <HiOutlineX />
+                    </button>
+                  )}
+                </div>
+                <p className="text-white text-[11px] font-medium truncate max-w-[70px] text-center leading-tight">
+                  {p.name}
+                  {p.is_host ? ' (Host)' : ''}
+                </p>
+              </motion.div>
+            ))}
             {Array.from({ length: Math.max(0, room.max_players - players.length) }).map((_, i) => (
               <div key={`empty-${i}`} className="flex flex-col items-center gap-1 opacity-35">
                 <div className="w-11 h-11 sm:w-13 sm:h-13 rounded-full border-2 border-dashed border-white/40" />
