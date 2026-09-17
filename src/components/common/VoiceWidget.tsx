@@ -32,16 +32,19 @@ export default function VoiceWidget() {
   const [corner, setCorner] = useState<'top-right' | 'bottom-left'>('top-right');
 
   const me = players.find((p) => p.id === myId);
+  const roomId = room?.id;
+  const myName = me?.name;
+  const isBotPlayer = me?.is_bot ?? false;
 
-  // Auto-connect to voice room & automatically request system microphone/speaker on room entry
+  // Auto-connect to voice room on room entry
   useEffect(() => {
-    if (room && me && !me.is_bot) {
-      joinVoice(room.id, me.id, me.name);
+    if (roomId && myId && !isBotPlayer) {
+      joinVoice(roomId, myId, myName || 'Player');
     }
     return () => {
       leaveVoice();
     };
-  }, [room, me, joinVoice, leaveVoice]);
+  }, [roomId, myId, myName, isBotPlayer, joinVoice, leaveVoice]);
 
   if (!room || !me) return null;
 

@@ -32,7 +32,7 @@ export const useVoiceStore = create<VoiceStore>((set) => {
   return {
     isJoined: false,
     isMuted: true,
-    isDeafened: true,
+    isDeafened: false,
     isSpeaking: false,
     peers: {},
     error: null,
