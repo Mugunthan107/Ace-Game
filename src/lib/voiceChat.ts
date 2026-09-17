@@ -7,6 +7,7 @@ export interface VoicePeerState {
   isMuted: boolean;
   isDeafened: boolean;
   isSpeaking: boolean;
+  connectionState?: string;
 }
 
 export type VoiceStateListener = (state: {
@@ -23,6 +24,8 @@ const ICE_SERVERS: RTCConfiguration = {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
   ],
 };
 
@@ -35,6 +38,7 @@ class VoiceChatManager {
   private localStream: MediaStream | null = null;
   private peerConnections: Map<string, RTCPeerConnection> = new Map();
   private remoteAudioElements: Map<string, HTMLAudioElement> = new Map();
+  private pendingIceCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
 
   private isMuted: boolean = false;
   private isDeafened: boolean = false;
@@ -81,9 +85,25 @@ class VoiceChatManager {
     });
   }
 
+  private getAudioContainer(): HTMLElement {
+    let container = document.getElementById('game-voice-audio-container');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'game-voice-audio-container';
+      container.style.position = 'fixed';
+      container.style.top = '-9999px';
+      container.style.left = '-9999px';
+      container.style.width = '1px';
+      container.style.height = '1px';
+      container.style.opacity = '0';
+      container.style.pointerEvents = 'none';
+      document.body.appendChild(container);
+    }
+    return container;
+  }
+
   /**
-   * Automatically requests system microphone and speaker access (like virtual assessment platforms).
-   * Directly triggers the native browser permission prompt on page entry.
+   * Captures microphone stream and primes audio context for playback
    */
   public async requestSystemPermissions(): Promise<boolean> {
     try {
@@ -91,18 +111,20 @@ class VoiceChatManager {
         return false;
       }
 
-      // 1. Ask system for microphone access automatically
       let stream: MediaStream | null = null;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      } catch (err: any) {
-        console.warn('System microphone access attempt 1:', err);
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+      } catch {
         try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: true, noiseSuppression: true },
-          });
-        } catch {
-          // If no physical mic or blocked, create audio stream so connection stays active
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (e) {
+          console.warn('Microphone hardware acquisition notice:', e);
           stream = this.createSyntheticAudioStream();
         }
       }
@@ -116,17 +138,10 @@ class VoiceChatManager {
       this.isMuted = false;
       this.error = null;
 
-      // 2. Unlock speaker AudioContext for room sound
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!this.audioContext || this.audioContext.state === 'closed') {
-        this.audioContext = new AudioCtx();
-      }
-      if (this.audioContext.state === 'suspended') {
-        await this.audioContext.resume().catch(() => {});
-      }
-      this.isDeafened = false;
+      // Prime AudioContext for receiving remote audio
+      this.ensureAudioContext();
 
-      // Attach audio track to all peer connections
+      // Attach track to all existing peer connections
       const audioTrack = stream.getAudioTracks()[0];
       if (audioTrack) {
         audioTrack.enabled = true;
@@ -136,7 +151,7 @@ class VoiceChatManager {
             (s) => s.track?.kind === 'audio' || !s.track
           );
           if (audioSender) {
-            audioSender.replaceTrack(audioTrack);
+            audioSender.replaceTrack(audioTrack).catch(() => {});
           } else {
             pc.addTrack(audioTrack, stream!);
           }
@@ -147,8 +162,25 @@ class VoiceChatManager {
       this.notify();
       return true;
     } catch (err: any) {
-      console.warn('Automatic system audio permission notice:', err);
+      console.warn('System audio setup notice:', err);
       return false;
+    }
+  }
+
+  private ensureAudioContext(): AudioContext | null {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return null;
+
+      if (!this.audioContext || this.audioContext.state === 'closed') {
+        this.audioContext = new AudioCtx();
+      }
+      if (this.audioContext.state === 'suspended') {
+        this.audioContext.resume().catch(() => {});
+      }
+      return this.audioContext;
+    } catch {
+      return null;
     }
   }
 
@@ -166,7 +198,7 @@ class VoiceChatManager {
     this.isMuted = false;
     this.isDeafened = false;
 
-    // Automatically trigger system permission request on room entry (like virtual assessment)
+    // Immediately ask browser for microphone/audio on room entry
     if (typeof navigator !== 'undefined' && Boolean(navigator?.mediaDevices?.getUserMedia)) {
       this.requestSystemPermissions().catch(() => {});
     }
@@ -175,44 +207,86 @@ class VoiceChatManager {
       this.channel = supabase.channel(`voice-${roomId}`, {
         config: {
           broadcast: { ack: false, self: false },
+          presence: { key: myId },
         },
       });
 
       this.channel
         .on('broadcast', { event: 'voice:join' }, ({ payload }) => this.handlePeerJoin(payload))
+        .on('broadcast', { event: 'voice:join-ack' }, ({ payload }) => this.handlePeerJoinAck(payload))
         .on('broadcast', { event: 'voice:offer' }, ({ payload }) => this.handleReceiveOffer(payload))
         .on('broadcast', { event: 'voice:answer' }, ({ payload }) => this.handleReceiveAnswer(payload))
         .on('broadcast', { event: 'voice:candidate' }, ({ payload }) => this.handleReceiveCandidate(payload))
         .on('broadcast', { event: 'voice:state' }, ({ payload }) => this.handlePeerStateUpdate(payload))
         .on('broadcast', { event: 'voice:leave' }, ({ payload }) => this.handlePeerLeave(payload))
-        .subscribe((status) => {
+        .on('presence', { event: 'sync' }, () => this.handlePresenceSync())
+        .subscribe(async (status) => {
           if (status === 'SUBSCRIBED') {
             this.isJoined = true;
             this.notify();
+
+            // Track presence
+            if (this.channel) {
+              await this.channel.track({
+                playerId: this.myId,
+                name: this.myName,
+                isMuted: this.isMuted,
+                isDeafened: this.isDeafened,
+                isSpeaking: this.isSpeaking,
+              });
+            }
+
+            // Broadcast join announcement
             this.broadcastJoin();
           }
         });
     } catch (err: any) {
-      console.warn('Voice chat channel error:', err);
+      console.warn('Voice channel setup error:', err);
       this.error = err?.message || 'Failed to connect to voice channel.';
       this.notify();
     }
   }
 
+  private handlePresenceSync() {
+    if (!this.channel || !this.myId) return;
+
+    const state = this.channel.presenceState();
+    Object.values(state).forEach((presences: any) => {
+      presences.forEach((presence: any) => {
+        if (presence.playerId && presence.playerId !== this.myId) {
+          const peerId = presence.playerId;
+          const isKnown = this.peers.has(peerId);
+
+          if (!isKnown) {
+            this.peers.set(peerId, {
+              playerId: peerId,
+              name: presence.name || 'Player',
+              isMuted: presence.isMuted ?? false,
+              isDeafened: presence.isDeafened ?? false,
+              isSpeaking: presence.isSpeaking ?? false,
+              connectionState: 'connecting',
+            });
+            this.notify();
+
+            // Lower ID initiates offer
+            if (this.myId && this.myId < peerId) {
+              this.createAndSendOffer(peerId);
+            }
+          }
+        }
+      });
+    });
+  }
+
   private createSyntheticAudioStream(): MediaStream {
     try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!this.audioContext || this.audioContext.state === 'closed') {
-        this.audioContext = new AudioCtx();
-      }
-      if (this.audioContext.state === 'suspended') {
-        this.audioContext.resume().catch(() => {});
-      }
+      const ctx = this.ensureAudioContext();
+      if (!ctx) return new MediaStream();
 
-      const dest = this.audioContext.createMediaStreamDestination();
-      const osc = this.audioContext.createOscillator();
-      const gain = this.audioContext.createGain();
-      gain.gain.value = 0.0001; // active carrier stream
+      const dest = ctx.createMediaStreamDestination();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      gain.gain.value = 0.0001;
       osc.connect(gain);
       gain.connect(dest);
       osc.start();
@@ -230,15 +304,11 @@ class VoiceChatManager {
         this.vadInterval = null;
       }
 
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioCtx) return;
+      const ctx = this.ensureAudioContext();
+      if (!ctx) return;
 
-      if (!this.audioContext || this.audioContext.state === 'closed') {
-        this.audioContext = new AudioCtx();
-      }
-
-      const source = this.audioContext.createMediaStreamSource(stream);
-      this.analyser = this.audioContext.createAnalyser();
+      const source = ctx.createMediaStreamSource(stream);
+      this.analyser = ctx.createAnalyser();
       this.analyser.fftSize = 512;
       this.analyser.smoothingTimeConstant = 0.4;
       source.connect(this.analyser);
@@ -326,9 +396,53 @@ class VoiceChatManager {
       isMuted: payload.isMuted ?? false,
       isDeafened: payload.isDeafened ?? false,
       isSpeaking: payload.isSpeaking ?? false,
+      connectionState: 'connecting',
     });
     this.notify();
 
+    // 1. Reply with join-ack so the newly joined peer is immediately aware of us!
+    if (this.channel && this.myId) {
+      this.channel.send({
+        type: 'broadcast',
+        event: 'voice:join-ack',
+        payload: {
+          to: payload.playerId,
+          playerId: this.myId,
+          name: this.myName,
+          isMuted: this.isMuted,
+          isDeafened: this.isDeafened,
+          isSpeaking: this.isSpeaking,
+        },
+      });
+    }
+
+    // 2. The peer with the lower ID initiates the WebRTC offer
+    if (this.myId && this.myId < payload.playerId) {
+      await this.createAndSendOffer(payload.playerId);
+    }
+  }
+
+  private async handlePeerJoinAck(payload: {
+    to: string;
+    playerId: string;
+    name: string;
+    isMuted: boolean;
+    isDeafened: boolean;
+    isSpeaking: boolean;
+  }) {
+    if (!payload || payload.to !== this.myId || payload.playerId === this.myId) return;
+
+    this.peers.set(payload.playerId, {
+      playerId: payload.playerId,
+      name: payload.name,
+      isMuted: payload.isMuted ?? false,
+      isDeafened: payload.isDeafened ?? false,
+      isSpeaking: payload.isSpeaking ?? false,
+      connectionState: 'connecting',
+    });
+    this.notify();
+
+    // The peer with the lower ID initiates the WebRTC offer
     if (this.myId && this.myId < payload.playerId) {
       await this.createAndSendOffer(payload.playerId);
     }
@@ -347,6 +461,12 @@ class VoiceChatManager {
     pc = new RTCPeerConnection(ICE_SERVERS);
     this.peerConnections.set(peerId, pc);
 
+    // Initialize pending candidates queue
+    if (!this.pendingIceCandidates.has(peerId)) {
+      this.pendingIceCandidates.set(peerId, []);
+    }
+
+    // Ensure local audio track is attached
     const audioTrack = this.localStream?.getAudioTracks()[0] ?? null;
     if (audioTrack) {
       pc.addTrack(audioTrack, this.localStream!);
@@ -354,6 +474,7 @@ class VoiceChatManager {
       pc.addTransceiver('audio', { direction: 'sendrecv' });
     }
 
+    // ICE candidates
     pc.onicecandidate = (event) => {
       if (event.candidate && this.channel && this.myId) {
         this.channel.send({
@@ -368,28 +489,39 @@ class VoiceChatManager {
       }
     };
 
+    // Incoming remote audio stream
     pc.ontrack = (event) => {
       const [remoteStream] = event.streams;
       if (!remoteStream) return;
 
+      const container = this.getAudioContainer();
       let audioEl = this.remoteAudioElements.get(peerId);
       if (!audioEl) {
-        audioEl = new Audio();
+        audioEl = document.createElement('audio');
         audioEl.autoplay = true;
         audioEl.setAttribute('playsinline', 'true');
         audioEl.muted = this.isDeafened;
+        container.appendChild(audioEl);
         this.remoteAudioElements.set(peerId, audioEl);
       }
+
       audioEl.srcObject = remoteStream;
-      if (!this.isDeafened) {
-        audioEl.play().catch((err) => {
-          console.warn('Remote audio playback notice:', err);
-        });
-      }
+      audioEl.muted = this.isDeafened;
+      audioEl.play().catch((err) => {
+        console.warn('Remote audio autoplay note:', err);
+      });
     };
 
+    // Connection state monitoring
     pc.onconnectionstatechange = () => {
-      if (pc?.connectionState === 'disconnected' || pc?.connectionState === 'failed') {
+      const cState = pc?.connectionState;
+      const peer = this.peers.get(peerId);
+      if (peer) {
+        peer.connectionState = cState;
+        this.notify();
+      }
+
+      if (cState === 'disconnected' || cState === 'failed') {
         this.cleanupPeer(peerId);
       }
     };
@@ -425,6 +557,10 @@ class VoiceChatManager {
     try {
       const pc = await this.getOrCreatePeerConnection(payload.from);
       await pc.setRemoteDescription(new RTCSessionDescription(payload.offer));
+
+      // Drain any queued ICE candidates that arrived before offer was set
+      await this.drainQueuedCandidates(payload.from, pc);
+
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
@@ -451,6 +587,8 @@ class VoiceChatManager {
       const pc = this.peerConnections.get(payload.from);
       if (pc && pc.signalingState === 'have-local-offer') {
         await pc.setRemoteDescription(new RTCSessionDescription(payload.answer));
+        // Drain any queued ICE candidates that arrived before answer was set
+        await this.drainQueuedCandidates(payload.from, pc);
       }
     } catch (err) {
       console.warn('Error setting remote description for answer from', payload.from, err);
@@ -462,12 +600,29 @@ class VoiceChatManager {
 
     try {
       const pc = this.peerConnections.get(payload.from);
-      if (pc && pc.remoteDescription) {
+      if (pc && pc.remoteDescription && pc.remoteDescription.type) {
         await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
+      } else {
+        // Queue candidate until remoteDescription is set
+        const queue = this.pendingIceCandidates.get(payload.from) || [];
+        queue.push(payload.candidate);
+        this.pendingIceCandidates.set(payload.from, queue);
       }
     } catch (err) {
       console.warn('Error adding ICE candidate from', payload.from, err);
     }
+  }
+
+  private async drainQueuedCandidates(peerId: string, pc: RTCPeerConnection) {
+    const queue = this.pendingIceCandidates.get(peerId) || [];
+    for (const cand of queue) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(cand));
+      } catch (err) {
+        console.warn('Error applying queued ICE candidate:', err);
+      }
+    }
+    this.pendingIceCandidates.set(peerId, []);
   }
 
   private handlePeerStateUpdate(payload: {
@@ -504,8 +659,10 @@ class VoiceChatManager {
     if (audioEl) {
       audioEl.pause();
       audioEl.srcObject = null;
+      audioEl.remove();
       this.remoteAudioElements.delete(peerId);
     }
+    this.pendingIceCandidates.delete(peerId);
   }
 
   /**
@@ -543,9 +700,7 @@ class VoiceChatManager {
   public toggleDeafen(): boolean {
     this.isDeafened = !this.isDeafened;
 
-    if (!this.isDeafened && this.audioContext && this.audioContext.state === 'suspended') {
-      this.audioContext.resume().catch(() => {});
-    }
+    this.ensureAudioContext();
 
     this.remoteAudioElements.forEach((el) => {
       el.muted = this.isDeafened;
@@ -602,10 +757,12 @@ class VoiceChatManager {
 
     this.peerConnections.forEach((pc) => pc.close());
     this.peerConnections.clear();
+    this.pendingIceCandidates.clear();
 
     this.remoteAudioElements.forEach((el) => {
       el.pause();
       el.srcObject = null;
+      el.remove();
     });
     this.remoteAudioElements.clear();
 
