@@ -33,7 +33,7 @@ interface VoiceStore {
   clearError: () => void;
 }
 
-// Module-level WebRTC & Audio state to keep store serialization clean
+// ─── Module-level WebRTC & Audio state ───
 let voiceChannel: RealtimeChannel | null = null;
 let isChannelSubscribed = false;
 let localStream: MediaStream | null = null;
@@ -44,57 +44,78 @@ let speechCheckInterval: ReturnType<typeof setInterval> | null = null;
 const peerConnections = new Map<string, RTCPeerConnection>();
 const remoteAudioElements = new Map<string, HTMLAudioElement>();
 const iceCandidateQueues = new Map<string, RTCIceCandidateInit[]>();
-const makingOfferMap = new Map<string, boolean>();
 
+// ─── ICE Configuration with STUN + TURN for reliable NAT traversal ───
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    // Free TURN servers for relay when direct connection fails (symmetric NAT, mobile networks)
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
   ],
+  iceCandidatePoolSize: 10,
 };
 
+// ─── Helper: determine if we should be the offerer (deterministic by ID) ───
+function shouldBeOfferer(myId: string, peerId: string): boolean {
+  return myId > peerId;
+}
+
+// ─── Audio element management ───
 function getOrCreateAudioElement(peerId: string): HTMLAudioElement {
   let audio = remoteAudioElements.get(peerId);
   if (!audio) {
     audio = new Audio();
     audio.autoplay = true;
-    // Required for iOS Safari to allow inline audio playback without fullscreen
     audio.setAttribute('playsinline', '');
     audio.setAttribute('webkit-playsinline', '');
     (audio as any).playsInline = true;
+    audio.volume = 1.0;
     remoteAudioElements.set(peerId, audio);
-
-    // Mobile browsers (especially iOS Safari) aggressively block autoplay.
-    // We must attempt play() and set up user-gesture-based resume as fallback.
-    const attemptPlay = () => {
-      if (audio) {
-        const playPromise = audio.play();
-        if (playPromise) {
-          playPromise.catch(() => {
-            // Autoplay blocked — register resume listeners for user gesture
-            const resumeOnGesture = () => {
-              audio?.play().catch(() => {});
-              // Also resume any suspended AudioContext (mobile requirement)
-              if (audioContext && audioContext.state === 'suspended') {
-                audioContext.resume().catch(() => {});
-              }
-              window.removeEventListener('click', resumeOnGesture);
-              window.removeEventListener('touchstart', resumeOnGesture);
-              window.removeEventListener('touchend', resumeOnGesture);
-            };
-            window.addEventListener('click', resumeOnGesture, { once: true });
-            window.addEventListener('touchstart', resumeOnGesture, { once: true });
-            window.addEventListener('touchend', resumeOnGesture, { once: true });
-          });
-        }
-      }
-    };
-    attemptPlay();
   }
   return audio;
 }
 
+function playAudioElement(audio: HTMLAudioElement, peerId: string) {
+  const playPromise = audio.play();
+  if (playPromise) {
+    playPromise.catch((err) => {
+      console.warn('[Voice] Autoplay blocked for', peerId, err.message);
+      // Mobile browsers block autoplay — resume on next user interaction
+      const resume = () => {
+        audio.play().catch(() => {});
+        if (audioContext && audioContext.state === 'suspended') {
+          audioContext.resume().catch(() => {});
+        }
+        window.removeEventListener('click', resume);
+        window.removeEventListener('touchstart', resume);
+        window.removeEventListener('touchend', resume);
+      };
+      window.addEventListener('click', resume, { once: true });
+      window.addEventListener('touchstart', resume, { once: true });
+      window.addEventListener('touchend', resume, { once: true });
+    });
+  }
+}
+
+// ─── Broadcast presence to peers ───
 function broadcastPresence(state: {
   isMicOn: boolean;
   isSpeakerOn: boolean;
@@ -118,13 +139,26 @@ function broadcastPresence(state: {
         joined: state.joined ?? false,
       },
     })
-    .catch(() => {});
+    .then((status) => {
+      if (status !== 'ok') {
+        console.warn('[Voice] Presence broadcast status:', status);
+      }
+    })
+    .catch((err) => {
+      console.warn('[Voice] Presence broadcast failed:', err);
+    });
 }
 
+// ─── Send WebRTC signal to a specific peer via broadcast ───
 function sendSignal(toId: string, signal: any) {
-  if (!voiceChannel || !isChannelSubscribed) return;
+  if (!voiceChannel || !isChannelSubscribed) {
+    console.warn('[Voice] Cannot send signal — channel not subscribed');
+    return;
+  }
   const store = useVoiceStore.getState();
   if (!store.myId) return;
+
+  console.log('[Voice] Sending signal', signal.type, 'to', toId.substring(0, 8));
 
   voiceChannel
     .send({
@@ -136,71 +170,90 @@ function sendSignal(toId: string, signal: any) {
         signal,
       },
     })
-    .catch(() => {});
+    .then((status) => {
+      if (status !== 'ok') {
+        console.warn('[Voice] Signal send status:', status, 'for', signal.type);
+      }
+    })
+    .catch((err) => {
+      console.warn('[Voice] Signal send failed:', err);
+    });
 }
 
-function createPeerConnection(peerId: string): RTCPeerConnection {
+// ─── Create and send an offer to a peer ───
+async function sendOffer(pc: RTCPeerConnection, peerId: string) {
+  try {
+    console.log('[Voice] Creating offer for', peerId.substring(0, 8));
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    if (pc.localDescription) {
+      sendSignal(peerId, {
+        type: 'offer',
+        sdp: pc.localDescription.toJSON(),
+      });
+    }
+  } catch (err) {
+    console.error('[Voice] Failed to send offer to', peerId.substring(0, 8), err);
+  }
+}
+
+// ─── Create a peer connection ───
+function createPeerConnection(peerId: string, isOfferer: boolean): RTCPeerConnection {
   const existing = peerConnections.get(peerId);
   if (existing) {
     return existing;
   }
 
+  console.log('[Voice] Creating peer connection for', peerId.substring(0, 8), 'isOfferer:', isOfferer);
+
   const pc = new RTCPeerConnection(RTC_CONFIG);
   peerConnections.set(peerId, pc);
-  makingOfferMap.set(peerId, false);
   iceCandidateQueues.set(peerId, []);
 
-  // Add existing local track if available
-  if (localStream) {
-    const audioTrack = localStream.getAudioTracks()[0];
-    if (audioTrack) {
-      pc.addTrack(audioTrack, localStream);
-    }
-  } else {
-    // Add transceiver in sendrecv mode so we can immediately receive audio from others
-    // This is critical: even without a mic, we need a transceiver to RECEIVE audio
+  // ── Add local audio track or create a silent placeholder ──
+  if (localStream && localStream.getAudioTracks().length > 0) {
+    const track = localStream.getAudioTracks()[0];
+    pc.addTrack(track, localStream);
+    console.log('[Voice] Added real audio track to peer', peerId.substring(0, 8));
+  } else if (isOfferer) {
+    // Offerer MUST add a transceiver so the SDP offer includes audio.
+    // The answerer will get a transceiver automatically from the offer.
     try {
       pc.addTransceiver('audio', { direction: 'sendrecv' });
-    } catch {
-      // Fallback for browsers that require track first
+      console.log('[Voice] Added audio transceiver for peer', peerId.substring(0, 8));
+    } catch (e) {
+      console.warn('[Voice] addTransceiver failed:', e);
     }
   }
 
-  // Handle incoming remote audio stream
+  // ── Handle incoming remote audio ──
   pc.ontrack = (event) => {
-    console.log('[Voice] ontrack fired for peer', peerId, 'track:', event.track.kind, 'readyState:', event.track.readyState);
+    console.log(
+      '[Voice] ✅ ontrack from', peerId.substring(0, 8),
+      '| track:', event.track.kind,
+      '| readyState:', event.track.readyState,
+      '| streams:', event.streams.length,
+    );
+
     const stream = event.streams[0] || new MediaStream([event.track]);
     const audio = getOrCreateAudioElement(peerId);
     audio.srcObject = stream;
 
-    // Set volume and muted state
     const speakerOn = useVoiceStore.getState().isSpeakerOn;
     audio.muted = !speakerOn;
     audio.volume = 1.0;
 
-    // Attempt to play — handle mobile autoplay restrictions
-    const playAudio = () => {
-      const playPromise = audio.play();
-      if (playPromise) {
-        playPromise.catch((playErr) => {
-          console.warn('[Voice] Audio play blocked for peer', peerId, playErr);
-          // On mobile, autoplay may be blocked — retry on next user gesture
-          const retryPlay = () => {
-            audio.play().catch(() => {});
-            window.removeEventListener('click', retryPlay);
-            window.removeEventListener('touchstart', retryPlay);
-            window.removeEventListener('touchend', retryPlay);
-          };
-          window.addEventListener('click', retryPlay, { once: true });
-          window.addEventListener('touchstart', retryPlay, { once: true });
-          window.addEventListener('touchend', retryPlay, { once: true });
-        });
-      }
+    playAudioElement(audio, peerId);
+
+    // Also listen for track unmute (some browsers fire ontrack before data flows)
+    event.track.onunmute = () => {
+      console.log('[Voice] Track unmuted for', peerId.substring(0, 8));
+      playAudioElement(audio, peerId);
     };
-    playAudio();
   };
 
-  // ICE candidate discovery
+  // ── ICE candidates ──
   pc.onicecandidate = (event) => {
     if (event.candidate) {
       sendSignal(peerId, {
@@ -210,72 +263,88 @@ function createPeerConnection(peerId: string): RTCPeerConnection {
     }
   };
 
-  // Perfect negotiation logic
-  pc.onnegotiationneeded = async () => {
-    console.log('[Voice] Negotiation needed with peer', peerId);
-    try {
-      makingOfferMap.set(peerId, true);
-      await pc.setLocalDescription();
-      if (pc.localDescription) {
-        sendSignal(peerId, {
-          type: 'offer',
-          sdp: pc.localDescription,
-        });
-      }
-    } catch (err) {
-      console.warn('[Voice] Negotiation error for peer', peerId, err);
-    } finally {
-      makingOfferMap.set(peerId, false);
-    }
+  pc.onicegatheringstatechange = () => {
+    console.log('[Voice] ICE gathering state:', pc.iceGatheringState, 'for', peerId.substring(0, 8));
   };
 
   pc.oniceconnectionstatechange = () => {
-    console.log('[Voice] ICE connection state for', peerId, ':', pc.iceConnectionState);
+    console.log('[Voice] ICE state:', pc.iceConnectionState, 'for', peerId.substring(0, 8));
   };
 
   pc.onconnectionstatechange = () => {
-    console.log('[Voice] Connection state for', peerId, ':', pc.connectionState);
-    if (pc.connectionState === 'failed') {
-      // Attempt ICE restart before giving up
-      console.log('[Voice] Connection failed, attempting ICE restart for', peerId);
-      pc.restartIce();
-    } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
+    console.log('[Voice] Connection state:', pc.connectionState, 'for', peerId.substring(0, 8));
+    if (pc.connectionState === 'connected') {
+      console.log('[Voice] ✅ Successfully connected to', peerId.substring(0, 8));
+    } else if (pc.connectionState === 'failed') {
+      console.warn('[Voice] ❌ Connection failed for', peerId.substring(0, 8), '— retrying');
+      // Destroy and recreate the connection
+      retryConnection(peerId);
+    } else if (pc.connectionState === 'disconnected') {
+      // Wait 5s then retry if still disconnected
+      setTimeout(() => {
+        const currentPc = peerConnections.get(peerId);
+        if (currentPc && currentPc.connectionState === 'disconnected') {
+          console.warn('[Voice] Still disconnected from', peerId.substring(0, 8), '— retrying');
+          retryConnection(peerId);
+        }
+      }, 5000);
+    } else if (pc.connectionState === 'closed') {
       cleanupPeer(peerId);
     }
   };
 
-  // Proactively initiate negotiation for the peer with the "higher" ID
-  // This ensures an offer/answer exchange happens even when both peers have mic off
-  const myId = useVoiceStore.getState().myId || '';
-  if (myId > peerId) {
-    // We are the polite peer — trigger an offer
-    setTimeout(async () => {
-      try {
-        if (pc.signalingState === 'stable' && !makingOfferMap.get(peerId)) {
-          console.log('[Voice] Proactively sending offer to', peerId);
-          makingOfferMap.set(peerId, true);
-          await pc.setLocalDescription();
-          if (pc.localDescription) {
-            sendSignal(peerId, {
-              type: 'offer',
-              sdp: pc.localDescription,
-            });
-          }
-        }
-      } catch (err) {
-        console.warn('[Voice] Proactive offer error for', peerId, err);
-      } finally {
-        makingOfferMap.set(peerId, false);
+  // ── Offerer initiates the SDP exchange ──
+  if (isOfferer) {
+    // Small delay to ensure event handlers on the answerer side are ready
+    setTimeout(() => {
+      if (pc.signalingState === 'stable') {
+        sendOffer(pc, peerId);
       }
-    }, 500);
+    }, 300);
   }
 
   return pc;
 }
 
+// ─── Retry a failed connection ───
+function retryConnection(peerId: string) {
+  const oldPc = peerConnections.get(peerId);
+  if (oldPc) {
+    oldPc.ontrack = null;
+    oldPc.onicecandidate = null;
+    oldPc.onconnectionstatechange = null;
+    oldPc.oniceconnectionstatechange = null;
+    oldPc.onicegatheringstatechange = null;
+    oldPc.close();
+  }
+  peerConnections.delete(peerId);
+  iceCandidateQueues.delete(peerId);
+
+  const audio = remoteAudioElements.get(peerId);
+  if (audio) {
+    audio.pause();
+    audio.srcObject = null;
+    remoteAudioElements.delete(peerId);
+  }
+
+  // Recreate — determine if we're the offerer
+  const myId = useVoiceStore.getState().myId || '';
+  const isOfferer = shouldBeOfferer(myId, peerId);
+
+  console.log('[Voice] Retrying connection for', peerId.substring(0, 8), 'isOfferer:', isOfferer);
+  createPeerConnection(peerId, isOfferer);
+}
+
+// ─── Clean up a peer ───
 function cleanupPeer(peerId: string) {
+  console.log('[Voice] Cleaning up peer', peerId.substring(0, 8));
   const pc = peerConnections.get(peerId);
   if (pc) {
+    pc.ontrack = null;
+    pc.onicecandidate = null;
+    pc.onconnectionstatechange = null;
+    pc.oniceconnectionstatechange = null;
+    pc.onicegatheringstatechange = null;
     pc.close();
     peerConnections.delete(peerId);
   }
@@ -283,10 +352,10 @@ function cleanupPeer(peerId: string) {
   if (audio) {
     audio.pause();
     audio.srcObject = null;
-    remoteAudioElements.delete(peerId);
+    remoteAudioElements.delete(audio as any);
   }
+  remoteAudioElements.delete(peerId);
   iceCandidateQueues.delete(peerId);
-  makingOfferMap.delete(peerId);
 
   useVoiceStore.setState((state) => {
     const updated = { ...state.remotePlayers };
@@ -295,6 +364,7 @@ function cleanupPeer(peerId: string) {
   });
 }
 
+// ─── Audio analysis for speaking detection ───
 function setupAudioAnalysis(stream: MediaStream) {
   try {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -304,12 +374,9 @@ function setupAudioAnalysis(stream: MediaStream) {
       audioContext = new AudioCtx();
     }
 
-    // iOS Safari & mobile Chrome require explicit resume() tied to a user gesture.
-    // Since toggleMic is always triggered by a button tap (user gesture), this resume
-    // will succeed on mobile.
+    // Resume AudioContext (required on mobile — must be in a user-gesture context)
     if (audioContext.state === 'suspended') {
       audioContext.resume().catch(() => {
-        // If resume fails, set up a one-time touch/click listener as backup
         const resumeCtx = () => {
           audioContext?.resume().catch(() => {});
           window.removeEventListener('touchstart', resumeCtx);
@@ -352,11 +419,10 @@ function setupAudioAnalysis(stream: MediaStream) {
       }
       const average = sum / dataArray.length;
 
-      // Threshold for voice activity detection (~14 out of 255)
       const isAudible = average > 14;
 
       if (isAudible) {
-        speakingHoldCounter = 3; // Keep speaking active for ~300ms to prevent flickering
+        speakingHoldCounter = 3;
         if (!store.isSpeaking) {
           useVoiceStore.setState({ isSpeaking: true });
           broadcastPresence({
@@ -383,13 +449,155 @@ function setupAudioAnalysis(stream: MediaStream) {
   }
 }
 
+// ─── Handle incoming signaling message ───
+async function handleSignal(fromId: string, signal: any) {
+  const myId = useVoiceStore.getState().myId || '';
+  const isOfferer = shouldBeOfferer(myId, fromId);
+
+  console.log('[Voice] Received signal', signal.type, 'from', fromId.substring(0, 8));
+
+  if (signal.type === 'offer') {
+    // We received an offer → we are the answerer
+    // Destroy existing connection if any (to handle renegotiation cleanly)
+    const existingPc = peerConnections.get(fromId);
+    if (existingPc) {
+      // If we also sent an offer (collision), the peer with lower ID wins (is the offerer)
+      // We are the answerer if we have the lower ID or if the other side is the offerer
+      if (isOfferer && existingPc.signalingState !== 'stable') {
+        // We are the offerer but received an offer — offer collision
+        // The OFFERER (higher ID) should back off and accept the incoming offer
+        console.log('[Voice] Offer collision — we are offerer, rolling back');
+        existingPc.ontrack = null;
+        existingPc.onicecandidate = null;
+        existingPc.onconnectionstatechange = null;
+        existingPc.oniceconnectionstatechange = null;
+        existingPc.onicegatheringstatechange = null;
+        existingPc.close();
+        peerConnections.delete(fromId);
+        iceCandidateQueues.delete(fromId);
+      } else if (existingPc.signalingState !== 'stable') {
+        // Not the offerer and not stable — something is off, recreate
+        console.log('[Voice] Existing PC not stable, recreating');
+        existingPc.ontrack = null;
+        existingPc.onicecandidate = null;
+        existingPc.onconnectionstatechange = null;
+        existingPc.oniceconnectionstatechange = null;
+        existingPc.onicegatheringstatechange = null;
+        existingPc.close();
+        peerConnections.delete(fromId);
+        iceCandidateQueues.delete(fromId);
+      }
+    }
+
+    // Create PC as answerer (isOfferer = false)
+    const pc = createPeerConnection(fromId, false);
+
+    try {
+      await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+      console.log('[Voice] Set remote description (offer) from', fromId.substring(0, 8));
+
+      // Flush queued ICE candidates
+      const queue = iceCandidateQueues.get(fromId) || [];
+      for (const cand of queue) {
+        await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+      }
+      iceCandidateQueues.set(fromId, []);
+
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      console.log('[Voice] Sending answer to', fromId.substring(0, 8));
+
+      sendSignal(fromId, {
+        type: 'answer',
+        sdp: pc.localDescription!.toJSON(),
+      });
+    } catch (err) {
+      console.error('[Voice] Error handling offer from', fromId.substring(0, 8), err);
+    }
+  } else if (signal.type === 'answer') {
+    const pc = peerConnections.get(fromId);
+    if (!pc) {
+      console.warn('[Voice] No PC for answer from', fromId.substring(0, 8));
+      return;
+    }
+
+    if (pc.signalingState !== 'have-local-offer') {
+      console.warn('[Voice] Unexpected answer in state', pc.signalingState, 'from', fromId.substring(0, 8));
+      return;
+    }
+
+    try {
+      await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+      console.log('[Voice] Set remote description (answer) from', fromId.substring(0, 8));
+
+      // Flush queued ICE candidates
+      const queue = iceCandidateQueues.get(fromId) || [];
+      for (const cand of queue) {
+        await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+      }
+      iceCandidateQueues.set(fromId, []);
+    } catch (err) {
+      console.error('[Voice] Error handling answer from', fromId.substring(0, 8), err);
+    }
+  } else if (signal.type === 'candidate' && signal.candidate) {
+    const pc = peerConnections.get(fromId);
+    if (!pc) {
+      // Queue candidate — PC might not exist yet
+      const queue = iceCandidateQueues.get(fromId) || [];
+      queue.push(signal.candidate);
+      iceCandidateQueues.set(fromId, queue);
+      return;
+    }
+
+    try {
+      if (pc.remoteDescription && pc.remoteDescription.type) {
+        await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+      } else {
+        const queue = iceCandidateQueues.get(fromId) || [];
+        queue.push(signal.candidate);
+        iceCandidateQueues.set(fromId, queue);
+      }
+    } catch (err) {
+      console.warn('[Voice] Error adding ICE candidate from', fromId.substring(0, 8), err);
+    }
+  } else if (signal.type === 'renegotiate') {
+    // Peer is asking us to renegotiate (e.g., they just turned on their mic)
+    console.log('[Voice] Renegotiate request from', fromId.substring(0, 8));
+    const existingPc = peerConnections.get(fromId);
+    if (existingPc) {
+      existingPc.ontrack = null;
+      existingPc.onicecandidate = null;
+      existingPc.onconnectionstatechange = null;
+      existingPc.oniceconnectionstatechange = null;
+      existingPc.onicegatheringstatechange = null;
+      existingPc.close();
+      peerConnections.delete(fromId);
+    }
+    iceCandidateQueues.delete(fromId);
+
+    const audio = remoteAudioElements.get(fromId);
+    if (audio) {
+      audio.pause();
+      audio.srcObject = null;
+      remoteAudioElements.delete(fromId);
+    }
+
+    // The renegotiate requester will send an offer, so we act as answerer
+    // PC will be created when we receive the offer
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── STORE ───
+// ═══════════════════════════════════════════════════════════
+
 export const useVoiceStore = create<VoiceStore>((set, get) => ({
   roomId: null,
   myId: null,
   myName: null,
   isJoined: false,
-  isMicOn: false, // DEFAULT: DISABLED as requested
-  isSpeakerOn: true, // DEFAULT: ENABLED (hear others)
+  isMicOn: false,
+  isSpeakerOn: true,
   isSpeaking: false,
   hasPermission: false,
   isRequestingMic: false,
@@ -398,20 +606,21 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
   remotePlayers: {},
 
   initVoice: async (roomId: string, myId: string, myName: string) => {
-    // If already joined for this room & player, do nothing
     if (get().isJoined && get().roomId === roomId && get().myId === myId) {
       return;
     }
 
-    // Clean up any previous room session
+    // Clean up previous session
     get().leaveVoice();
+
+    console.log('[Voice] Initializing voice for room', roomId, 'as', myId.substring(0, 8));
 
     set({
       roomId,
       myId,
       myName,
       isJoined: true,
-      isMicOn: false, // Ensure default mic disabled
+      isMicOn: false,
       isSpeakerOn: true,
       isSpeaking: false,
       isVirtualMic: false,
@@ -424,10 +633,12 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
       config: { broadcast: { self: false } },
     });
 
-    // Handle incoming presence updates (status of mic/speaker/speaking for peers)
+    // ── Handle presence updates from peers ──
     voiceChannel.on('broadcast', { event: 'voice-presence' }, ({ payload }) => {
       const { playerId, playerName, isMicOn, isSpeakerOn, isSpeaking, joined } = payload;
       if (!playerId || playerId === get().myId) return;
+
+      console.log('[Voice] Presence from', playerName, '(' + playerId.substring(0, 8) + ')', joined ? '(joined)' : '');
 
       set((state) => ({
         remotePlayers: {
@@ -443,9 +654,14 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
       }));
 
       // Ensure peer connection exists
-      createPeerConnection(playerId);
+      const currentMyId = get().myId || '';
+      const isOfferer = shouldBeOfferer(currentMyId, playerId);
 
-      // If this peer just announced they joined, announce our presence back so they know about us
+      if (!peerConnections.has(playerId)) {
+        createPeerConnection(playerId, isOfferer);
+      }
+
+      // Reply to newly joined peer so they know about us
       if (joined) {
         broadcastPresence({
           isMicOn: get().isMicOn,
@@ -456,67 +672,21 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
       }
     });
 
-    // Handle WebRTC signaling (offer, answer, ICE candidates)
+    // ── Handle WebRTC signaling messages ──
     voiceChannel.on('broadcast', { event: 'voice-signal' }, async ({ payload }) => {
       const { fromId, toId, signal } = payload;
       const currentMyId = get().myId;
       if (toId !== currentMyId || !fromId) return;
 
-      const pc = createPeerConnection(fromId);
-      const isPolite = (currentMyId || '') > fromId; // Deterministic polite peer
-
-      try {
-        if (signal.type === 'offer') {
-          const makingOffer = makingOfferMap.get(fromId) || false;
-          const offerCollision = makingOffer || pc.signalingState !== 'stable';
-          if (offerCollision && !isPolite) {
-            // Impolite peer rejects incoming offer during collision
-            return;
-          }
-
-          await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
-
-          // Flush queued ICE candidates
-          const queue = iceCandidateQueues.get(fromId) || [];
-          for (const cand of queue) {
-            await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
-          }
-          iceCandidateQueues.set(fromId, []);
-
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-
-          sendSignal(fromId, {
-            type: 'answer',
-            sdp: pc.localDescription,
-          });
-        } else if (signal.type === 'answer') {
-          await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
-
-          // Flush queued ICE candidates
-          const queue = iceCandidateQueues.get(fromId) || [];
-          for (const cand of queue) {
-            await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
-          }
-          iceCandidateQueues.set(fromId, []);
-        } else if (signal.type === 'candidate' && signal.candidate) {
-          if (pc.remoteDescription && pc.remoteDescription.type) {
-            await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
-          } else {
-            const queue = iceCandidateQueues.get(fromId) || [];
-            queue.push(signal.candidate);
-            iceCandidateQueues.set(fromId, queue);
-          }
-        }
-      } catch (err) {
-        console.warn('Signaling message error from', fromId, err);
-      }
+      await handleSignal(fromId, signal);
     });
 
+    // ── Subscribe to channel ──
     voiceChannel.subscribe((status) => {
+      console.log('[Voice] Channel subscription status:', status);
       if (status === 'SUBSCRIBED') {
         isChannelSubscribed = true;
-        // Announce our presence to all peers in the room
+        // Announce our presence
         broadcastPresence({
           isMicOn: false,
           isSpeakerOn: true,
@@ -530,7 +700,9 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
   },
 
   leaveVoice: () => {
+    console.log('[Voice] Leaving voice room');
     isChannelSubscribed = false;
+
     if (speechCheckInterval) {
       clearInterval(speechCheckInterval);
       speechCheckInterval = null;
@@ -547,13 +719,17 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
       analyserNode = null;
     }
 
-    // Close all peer connections
-    peerConnections.forEach((pc) => pc.close());
+    peerConnections.forEach((pc) => {
+      pc.ontrack = null;
+      pc.onicecandidate = null;
+      pc.onconnectionstatechange = null;
+      pc.oniceconnectionstatechange = null;
+      pc.onicegatheringstatechange = null;
+      pc.close();
+    });
     peerConnections.clear();
-    makingOfferMap.clear();
     iceCandidateQueues.clear();
 
-    // Clean up remote audio elements
     remoteAudioElements.forEach((audio) => {
       audio.pause();
       audio.srcObject = null;
@@ -582,7 +758,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
     const { isMicOn } = get();
 
     if (isMicOn) {
-      // TURN MIC OFF (Mute)
+      // TURN MIC OFF
       if (localStream) {
         localStream.getAudioTracks().forEach((track) => {
           track.enabled = false;
@@ -597,13 +773,11 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
       return;
     }
 
-    // TURN MIC ON (Unmute & request permission if needed)
+    // TURN MIC ON
     set({ isRequestingMic: true, error: null });
 
     try {
-      // ── 1. Secure Context Check ──
-      // Mobile browsers (Chrome, Safari, Firefox) REQUIRE HTTPS for getUserMedia.
-      // Without HTTPS, navigator.mediaDevices is undefined on mobile.
+      // ── 1. Secure context check (HTTPS required on mobile) ──
       if (typeof window !== 'undefined' && !window.isSecureContext) {
         throw {
           name: 'InsecureContextError',
@@ -611,7 +785,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
         };
       }
 
-      // ── 2. Check if mediaDevices API is available ──
+      // ── 2. mediaDevices API check ──
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw {
           name: 'NotSupportedError',
@@ -619,8 +793,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
         };
       }
 
-      // ── 3. Resume AudioContext on user gesture (required by iOS Safari & mobile Chrome) ──
-      // Mobile browsers suspend AudioContext until a user gesture triggers resume()
+      // ── 3. Resume AudioContext ──
       if (audioContext && audioContext.state === 'suspended') {
         await audioContext.resume().catch(() => {});
       }
@@ -628,30 +801,22 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
       if (!localStream || localStream.getAudioTracks().length === 0) {
         let stream: MediaStream;
 
-        // ── 4. Check for available audio input devices ──
-        // On mobile, enumerateDevices may return empty labels until permission is granted,
-        // but we can still detect if any audioinput device exists
+        // ── 4. Check for audio input devices ──
         let hasAudioInput = true;
         try {
           const devices = await navigator.mediaDevices.enumerateDevices();
           const audioInputs = devices.filter((d) => d.kind === 'audioinput');
           hasAudioInput = audioInputs.length > 0;
         } catch {
-          // enumerateDevices may fail on older mobile browsers — proceed anyway
+          // Proceed anyway
         }
 
         if (!hasAudioInput) {
-          throw {
-            name: 'NotFoundError',
-            message: 'No microphone found.',
-          };
+          throw { name: 'NotFoundError', message: 'No microphone found.' };
         }
 
-        // ── 5. Progressive constraint fallback for cross-device compatibility ──
-        // Some mobile devices reject advanced constraints (echoCancellation, noiseSuppression)
-        // Strategy: try advanced → basic constraints → minimal { audio: true }
+        // ── 5. Progressive constraint fallback ──
         const constraintSets: MediaStreamConstraints[] = [
-          // Attempt 1: Full constraints (works on most laptops & modern phones)
           {
             audio: {
               echoCancellation: true,
@@ -660,11 +825,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
             },
             video: false,
           },
-          // Attempt 2: Minimal audio (works on older/stricter mobile browsers)
-          {
-            audio: true,
-            video: false,
-          },
+          { audio: true, video: false },
         ];
 
         let lastError: any = null;
@@ -675,14 +836,12 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
             break;
           } catch (attemptErr: any) {
             lastError = attemptErr;
-            // If permission was explicitly denied, don't try the next constraint set
             if (
               attemptErr?.name === 'NotAllowedError' ||
               attemptErr?.name === 'PermissionDeniedError'
             ) {
               break;
             }
-            // Otherwise continue to next (simpler) constraint set
           }
         }
 
@@ -691,49 +850,76 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
         }
 
         localStream = stream!;
+        console.log('[Voice] Got microphone stream, tracks:', stream!.getAudioTracks().length);
         setupAudioAnalysis(stream!);
 
-        // Attach track to all existing peer connections
+        // ── 6. Add track to all peer connections and renegotiate ──
         const newTrack = stream!.getAudioTracks()[0];
-        peerConnections.forEach((pc, peerId) => {
-          const senders = pc.getSenders();
-          const audioSender = senders.find(
-            (s) => s.track === null || (s.track && s.track.kind === 'audio'),
-          );
-          if (audioSender) {
-            audioSender.replaceTrack(newTrack).catch((err) => {
-              console.warn('[Voice] replaceTrack failed for', peerId, err);
-              // Fallback: add as new track which triggers renegotiation
-              try {
-                pc.addTrack(newTrack, stream!);
-              } catch {
-                // Already has sender
-              }
-            });
-          } else {
-            pc.addTrack(newTrack, stream!);
-          }
+        const myId = get().myId || '';
 
-          // If the connection was never fully established (e.g. both joined with mic off),
-          // replacing a track on an idle sender won't trigger onnegotiationneeded.
-          // Force renegotiation so the remote peer actually receives our audio.
-          if (
-            pc.connectionState === 'new' ||
-            pc.iceConnectionState === 'new' ||
-            pc.connectionState === 'disconnected'
-          ) {
-            console.log('[Voice] Forcing renegotiation for peer', peerId, 'state:', pc.connectionState);
-            pc.restartIce();
+        // For each peer, we need to either replace the track or create a new connection
+        const peerIds = Array.from(peerConnections.keys());
+        for (const peerId of peerIds) {
+          const pc = peerConnections.get(peerId);
+          if (!pc) continue;
+
+          const connectionAlive =
+            pc.connectionState === 'connected' || pc.connectionState === 'connecting';
+
+          if (connectionAlive) {
+            // Connection exists — try to replace track on existing sender
+            const senders = pc.getSenders();
+            const audioSender = senders.find(
+              (s) => s.track === null || (s.track && s.track.kind === 'audio'),
+            );
+            if (audioSender) {
+              await audioSender.replaceTrack(newTrack).catch((err) => {
+                console.warn('[Voice] replaceTrack failed for', peerId.substring(0, 8), err);
+              });
+              console.log('[Voice] Replaced track on connected peer', peerId.substring(0, 8));
+            } else {
+              pc.addTrack(newTrack, stream!);
+              console.log('[Voice] Added new track to connected peer', peerId.substring(0, 8));
+            }
+          } else {
+            // Connection not alive — destroy and recreate with the new track
+            console.log('[Voice] Connection not alive for', peerId.substring(0, 8), '— renegotiating');
+
+            pc.ontrack = null;
+            pc.onicecandidate = null;
+            pc.onconnectionstatechange = null;
+            pc.oniceconnectionstatechange = null;
+            pc.onicegatheringstatechange = null;
+            pc.close();
+            peerConnections.delete(peerId);
+            iceCandidateQueues.delete(peerId);
+
+            const audio = remoteAudioElements.get(peerId);
+            if (audio) {
+              audio.pause();
+              audio.srcObject = null;
+              remoteAudioElements.delete(peerId);
+            }
+
+            const isOfferer = shouldBeOfferer(myId, peerId);
+            if (isOfferer) {
+              // We recreate as offerer with our track
+              createPeerConnection(peerId, true);
+            } else {
+              // Ask the peer to renegotiate — they should send us a new offer
+              sendSignal(peerId, { type: 'renegotiate' });
+              // Also create our side as answerer (the PC will be ready when offer arrives)
+            }
           }
-        });
+        }
       } else {
+        // Re-enable existing tracks
         localStream.getAudioTracks().forEach((track) => {
           track.enabled = true;
         });
       }
 
-      // ── 6. Ensure AudioContext is running after acquiring stream ──
-      // iOS Safari often needs this after getUserMedia completes
+      // ── 7. Ensure AudioContext is running ──
       if (audioContext && audioContext.state === 'suspended') {
         await audioContext.resume().catch(() => {});
       }
@@ -850,21 +1036,18 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
   setSpeaker: (enabled: boolean) => {
     set({ isSpeakerOn: enabled });
 
-    // Resume AudioContext if needed (mobile requirement)
+    // Resume AudioContext if needed (mobile)
     if (enabled && audioContext && audioContext.state === 'suspended') {
       audioContext.resume().catch(() => {});
     }
 
-    // Update all remote audio elements
     remoteAudioElements.forEach((audio) => {
       audio.muted = !enabled;
       audio.volume = 1.0;
       if (enabled) {
         const playPromise = audio.play();
         if (playPromise) {
-          playPromise.catch(() => {
-            // Mobile autoplay blocked — will resume on next user interaction
-          });
+          playPromise.catch(() => {});
         }
       }
     });
