@@ -45,33 +45,88 @@ const peerConnections = new Map<string, RTCPeerConnection>();
 const remoteAudioElements = new Map<string, HTMLAudioElement>();
 const iceCandidateQueues = new Map<string, RTCIceCandidateInit[]>();
 
-// ─── ICE Configuration with STUN + TURN for reliable NAT traversal ───
-const RTC_CONFIG: RTCConfiguration = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
-    // Free TURN servers for relay when direct connection fails (symmetric NAT, mobile networks)
-    {
-      urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
-  ],
+// ─── ICE Configuration ───
+// STUN servers are free and help discover public IPs.
+// TURN servers are required when devices are on different networks (mobile data + WiFi).
+// TURN credentials are fetched dynamically from Metered.ca free tier.
+const STUN_SERVERS: RTCIceServer[] = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' },
+];
+
+let rtcConfig: RTCConfiguration = {
+  iceServers: [...STUN_SERVERS],
   iceCandidatePoolSize: 10,
 };
+
+// Fetch TURN credentials from Metered.ca
+async function fetchTurnCredentials(): Promise<void> {
+  const appName = import.meta.env.VITE_METERED_APP_NAME || 'mugu';
+  const apiKey = import.meta.env.VITE_METERED_API_KEY;
+  const turnUsername = import.meta.env.VITE_METERED_USERNAME;
+  const turnCredential = import.meta.env.VITE_METERED_CREDENTIAL;
+
+  // Helper for static fallback
+  const applyStaticCredentials = () => {
+    if (turnUsername && turnCredential) {
+      const staticTurnServers: RTCIceServer[] = [
+        { urls: 'stun:stun.relay.metered.ca:80' },
+        {
+          urls: [
+            'turn:global.relay.metered.ca:80',
+            'turn:global.relay.metered.ca:80?transport=tcp',
+            'turn:global.relay.metered.ca:443',
+            'turns:global.relay.metered.ca:443?transport=tcp',
+          ],
+          username: turnUsername,
+          credential: turnCredential,
+        },
+      ];
+      rtcConfig = {
+        iceServers: [...STUN_SERVERS, ...staticTurnServers],
+        iceCandidatePoolSize: 10,
+      };
+      console.log('[Voice] ✅ Configured static Metered TURN servers');
+      return true;
+    }
+    return false;
+  };
+
+  // Try dynamic API if valid key is available
+  if (apiKey && !apiKey.startsWith('http://') && !apiKey.startsWith('https://')) {
+    try {
+      const response = await fetch(
+        `https://${appName}.metered.live/api/v1/turn/credentials?apiKey=${apiKey}`,
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      const turnServers: RTCIceServer[] = await response.json();
+      console.log('[Voice] ✅ Fetched', turnServers.length, 'TURN servers from Metered.ca (app:', appName, ')');
+
+      rtcConfig = {
+        iceServers: [...STUN_SERVERS, ...turnServers],
+        iceCandidatePoolSize: 10,
+      };
+      return;
+    } catch (err) {
+      console.warn('[Voice] ⚠️ Dynamic TURN fetch failed, trying static fallback:', err);
+    }
+  }
+
+  // Fallback to static credentials if API fetch was skipped or failed
+  if (applyStaticCredentials()) {
+    return;
+  }
+
+  console.warn(
+    '[Voice] ⚠️ No valid TURN credentials found — using STUN only.',
+    'Voice chat will NOT work across different networks (e.g. mobile data + WiFi).',
+  );
+}
 
 // ─── Helper: determine if we should be the offerer (deterministic by ID) ───
 function shouldBeOfferer(myId: string, peerId: string): boolean {
@@ -88,6 +143,10 @@ function getOrCreateAudioElement(peerId: string): HTMLAudioElement {
     audio.setAttribute('webkit-playsinline', '');
     (audio as any).playsInline = true;
     audio.volume = 1.0;
+    audio.style.display = 'none';
+    if (typeof document !== 'undefined' && document.body) {
+      document.body.appendChild(audio);
+    }
     remoteAudioElements.set(peerId, audio);
   }
   return audio;
@@ -207,7 +266,7 @@ function createPeerConnection(peerId: string, isOfferer: boolean): RTCPeerConnec
 
   console.log('[Voice] Creating peer connection for', peerId.substring(0, 8), 'isOfferer:', isOfferer);
 
-  const pc = new RTCPeerConnection(RTC_CONFIG);
+  const pc = new RTCPeerConnection(rtcConfig);
   peerConnections.set(peerId, pc);
   iceCandidateQueues.set(peerId, []);
 
@@ -324,6 +383,7 @@ function retryConnection(peerId: string) {
   if (audio) {
     audio.pause();
     audio.srcObject = null;
+    audio.remove();
     remoteAudioElements.delete(peerId);
   }
 
@@ -352,7 +412,7 @@ function cleanupPeer(peerId: string) {
   if (audio) {
     audio.pause();
     audio.srcObject = null;
-    remoteAudioElements.delete(audio as any);
+    audio.remove();
   }
   remoteAudioElements.delete(peerId);
   iceCandidateQueues.delete(peerId);
@@ -613,6 +673,9 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
     // Clean up previous session
     get().leaveVoice();
 
+    // Fetch TURN credentials for reliable cross-network connectivity
+    await fetchTurnCredentials();
+
     console.log('[Voice] Initializing voice for room', roomId, 'as', myId.substring(0, 8));
 
     set({
@@ -733,6 +796,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
     remoteAudioElements.forEach((audio) => {
       audio.pause();
       audio.srcObject = null;
+      audio.remove();
     });
     remoteAudioElements.clear();
 
