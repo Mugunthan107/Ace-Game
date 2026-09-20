@@ -158,6 +158,7 @@ function createPeerConnection(peerId: string): RTCPeerConnection {
     }
   } else {
     // Add transceiver in sendrecv mode so we can immediately receive audio from others
+    // This is critical: even without a mic, we need a transceiver to RECEIVE audio
     try {
       pc.addTransceiver('audio', { direction: 'sendrecv' });
     } catch {
@@ -167,11 +168,36 @@ function createPeerConnection(peerId: string): RTCPeerConnection {
 
   // Handle incoming remote audio stream
   pc.ontrack = (event) => {
+    console.log('[Voice] ontrack fired for peer', peerId, 'track:', event.track.kind, 'readyState:', event.track.readyState);
     const stream = event.streams[0] || new MediaStream([event.track]);
     const audio = getOrCreateAudioElement(peerId);
     audio.srcObject = stream;
-    audio.muted = !useVoiceStore.getState().isSpeakerOn;
-    audio.play().catch(() => {});
+
+    // Set volume and muted state
+    const speakerOn = useVoiceStore.getState().isSpeakerOn;
+    audio.muted = !speakerOn;
+    audio.volume = 1.0;
+
+    // Attempt to play — handle mobile autoplay restrictions
+    const playAudio = () => {
+      const playPromise = audio.play();
+      if (playPromise) {
+        playPromise.catch((playErr) => {
+          console.warn('[Voice] Audio play blocked for peer', peerId, playErr);
+          // On mobile, autoplay may be blocked — retry on next user gesture
+          const retryPlay = () => {
+            audio.play().catch(() => {});
+            window.removeEventListener('click', retryPlay);
+            window.removeEventListener('touchstart', retryPlay);
+            window.removeEventListener('touchend', retryPlay);
+          };
+          window.addEventListener('click', retryPlay, { once: true });
+          window.addEventListener('touchstart', retryPlay, { once: true });
+          window.addEventListener('touchend', retryPlay, { once: true });
+        });
+      }
+    };
+    playAudio();
   };
 
   // ICE candidate discovery
@@ -186,6 +212,7 @@ function createPeerConnection(peerId: string): RTCPeerConnection {
 
   // Perfect negotiation logic
   pc.onnegotiationneeded = async () => {
+    console.log('[Voice] Negotiation needed with peer', peerId);
     try {
       makingOfferMap.set(peerId, true);
       await pc.setLocalDescription();
@@ -196,17 +223,52 @@ function createPeerConnection(peerId: string): RTCPeerConnection {
         });
       }
     } catch (err) {
-      console.warn('Negotiation error for peer', peerId, err);
+      console.warn('[Voice] Negotiation error for peer', peerId, err);
     } finally {
       makingOfferMap.set(peerId, false);
     }
   };
 
+  pc.oniceconnectionstatechange = () => {
+    console.log('[Voice] ICE connection state for', peerId, ':', pc.iceConnectionState);
+  };
+
   pc.onconnectionstatechange = () => {
-    if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+    console.log('[Voice] Connection state for', peerId, ':', pc.connectionState);
+    if (pc.connectionState === 'failed') {
+      // Attempt ICE restart before giving up
+      console.log('[Voice] Connection failed, attempting ICE restart for', peerId);
+      pc.restartIce();
+    } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
       cleanupPeer(peerId);
     }
   };
+
+  // Proactively initiate negotiation for the peer with the "higher" ID
+  // This ensures an offer/answer exchange happens even when both peers have mic off
+  const myId = useVoiceStore.getState().myId || '';
+  if (myId > peerId) {
+    // We are the polite peer — trigger an offer
+    setTimeout(async () => {
+      try {
+        if (pc.signalingState === 'stable' && !makingOfferMap.get(peerId)) {
+          console.log('[Voice] Proactively sending offer to', peerId);
+          makingOfferMap.set(peerId, true);
+          await pc.setLocalDescription();
+          if (pc.localDescription) {
+            sendSignal(peerId, {
+              type: 'offer',
+              sdp: pc.localDescription,
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('[Voice] Proactive offer error for', peerId, err);
+      } finally {
+        makingOfferMap.set(peerId, false);
+      }
+    }, 500);
+  }
 
   return pc;
 }
@@ -633,13 +695,35 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
 
         // Attach track to all existing peer connections
         const newTrack = stream!.getAudioTracks()[0];
-        peerConnections.forEach((pc) => {
+        peerConnections.forEach((pc, peerId) => {
           const senders = pc.getSenders();
-          const audioSender = senders.find((s) => s.track?.kind === 'audio' || s.track === null);
+          const audioSender = senders.find(
+            (s) => s.track === null || (s.track && s.track.kind === 'audio'),
+          );
           if (audioSender) {
-            audioSender.replaceTrack(newTrack).catch(() => {});
+            audioSender.replaceTrack(newTrack).catch((err) => {
+              console.warn('[Voice] replaceTrack failed for', peerId, err);
+              // Fallback: add as new track which triggers renegotiation
+              try {
+                pc.addTrack(newTrack, stream!);
+              } catch {
+                // Already has sender
+              }
+            });
           } else {
             pc.addTrack(newTrack, stream!);
+          }
+
+          // If the connection was never fully established (e.g. both joined with mic off),
+          // replacing a track on an idle sender won't trigger onnegotiationneeded.
+          // Force renegotiation so the remote peer actually receives our audio.
+          if (
+            pc.connectionState === 'new' ||
+            pc.iceConnectionState === 'new' ||
+            pc.connectionState === 'disconnected'
+          ) {
+            console.log('[Voice] Forcing renegotiation for peer', peerId, 'state:', pc.connectionState);
+            pc.restartIce();
           }
         });
       } else {
@@ -766,11 +850,22 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
   setSpeaker: (enabled: boolean) => {
     set({ isSpeakerOn: enabled });
 
+    // Resume AudioContext if needed (mobile requirement)
+    if (enabled && audioContext && audioContext.state === 'suspended') {
+      audioContext.resume().catch(() => {});
+    }
+
     // Update all remote audio elements
     remoteAudioElements.forEach((audio) => {
       audio.muted = !enabled;
+      audio.volume = 1.0;
       if (enabled) {
-        audio.play().catch(() => {});
+        const playPromise = audio.play();
+        if (playPromise) {
+          playPromise.catch(() => {
+            // Mobile autoplay blocked — will resume on next user interaction
+          });
+        }
       }
     });
 
