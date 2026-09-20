@@ -7,13 +7,18 @@ export function findAceSpadesPlayer(players: PlayerRow[]): PlayerRow | null {
   return players.find((p) => p.cards.some((c) => c.suit === 'spades' && c.rank === 'A')) ?? null;
 }
 
-/**
- * Returns true if `card` is a legal play for a hand, given the current lead suit.
- * - No lead suit yet (this player is leading the trick) -> anything is legal.
- * - Player holds the lead suit -> only lead-suit cards are legal.
- * - Player has none of the lead suit -> any card is legal (a "hit").
- */
-export function canPlayCard(hand: Card[], card: Card, leadSuit: Suit | null): boolean {
+export function canPlayCard(
+  hand: Card[],
+  card: Card,
+  leadSuit: Suit | null,
+  roundNumber?: number
+): boolean {
+  if (roundNumber === 1 && !leadSuit) {
+    const hasAceSpades = hand.some((c) => c.suit === 'spades' && c.rank === 'A');
+    if (hasAceSpades) {
+      return card.suit === 'spades' && card.rank === 'A';
+    }
+  }
   if (!leadSuit) return true;
   const hasLeadSuit = hand.some((c) => c.suit === leadSuit);
   if (!hasLeadSuit) return true;
@@ -21,10 +26,14 @@ export function canPlayCard(hand: Card[], card: Card, leadSuit: Suit | null): bo
 }
 
 /** Returns the set of card ids in `hand` that are currently legal to play. */
-export function legalCardIds(hand: Card[], leadSuit: Suit | null): Set<string> {
+export function legalCardIds(
+  hand: Card[],
+  leadSuit: Suit | null,
+  roundNumber?: number
+): Set<string> {
   const ids = new Set<string>();
   for (const c of hand) {
-    if (canPlayCard(hand, c, leadSuit)) ids.add(c.id);
+    if (canPlayCard(hand, c, leadSuit, roundNumber)) ids.add(c.id);
   }
   return ids;
 }
@@ -176,6 +185,7 @@ export function startGameDeal(players: PlayerRow[]): { players: PlayerRow[]; gam
   const firstLeader = findAceSpadesPlayer(updated)!;
   const gameState: GameState = {
     ...emptyGameState(),
+    players: updated,
     gameStarted: true,
     roundNumber: 1,
     currentLeader: firstLeader.id,
@@ -217,6 +227,11 @@ export function applyCardPlay(
   // Rule: each player can put only ONE card for each round
   if (gameState.centerPile.some((tc) => tc.playerId === actorId)) {
     throw new Error(`${actor.name} has already played a card in this round.`);
+  }
+
+  // Legal play validation according to game rules (suit follow & Round 1 Ace of Spades)
+  if (!canPlayCard(actor.cards, card, gameState.leadSuit, gameState.roundNumber)) {
+    throw new Error('Illegal card play according to game rules.');
   }
 
   const newHand = removeCards(actor.cards, [card.id]);
@@ -261,6 +276,7 @@ export function applyCardPlay(
 
     const newGameState: GameState = {
       ...gameState,
+      players: updated,
       centerPile, // Cards stay on table so everyone sees the hit!
       leadSuit,
       currentTurn: null, // Pause turns during observation
@@ -281,6 +297,7 @@ export function applyCardPlay(
   // Trick continues normally — advance to the next active player who has NOT yet played this round.
   const newGameState: GameState = {
     ...gameState,
+    players: updated,
     centerPile,
     leadSuit,
     currentTurn: nextPlayer.id,
@@ -421,6 +438,7 @@ export function finalizeTrickResolution(
 
   const newGameState: GameState = {
     ...gameState,
+    players: updated,
     discardPile,
     centerPile: [],
     lastRoundPile: gameState.centerPile,
@@ -536,6 +554,7 @@ export function applyCardTransfer(
 
   const newGameState: GameState = {
     ...gameState,
+    players: updated,
     currentTurn,
     currentLeader,
     rankings: finalRankings,
@@ -581,6 +600,7 @@ export function declarePlayerAss(
 
   const newGameState: GameState = {
     ...gameState,
+    players: updated,
     gameEnded: true,
     donkeyPlayerId: assPlayerId,
     currentLeader: null,

@@ -37,42 +37,46 @@ export default function CenterPile({
   const hasPreviousCards = !hasCurrentCards && lastRoundPile.length > 0;
 
   return (
-    <div className="absolute left-1/2 top-[46%] -translate-x-1/2 -translate-y-1/2 flex items-center justify-center pointer-events-none w-[64%] sm:w-[48%] md:w-[40%] max-w-[240px] sm:max-w-xs md:max-w-sm z-10">
+    <div className="absolute left-1/2 top-[46%] -translate-x-1/2 -translate-y-1/2 flex items-center justify-center pointer-events-none z-10 w-auto min-w-[155px] max-w-[205px] sm:max-w-[230px]">
       <div
-        className={`transition-all duration-300 pointer-events-auto rounded-2xl sm:rounded-3xl bg-slate-950/85 border backdrop-blur-md shadow-2xl p-2 sm:p-3.5 flex flex-col items-center justify-center w-full min-h-[110px] sm:min-h-[145px] ${
+        className={`transition-all duration-300 pointer-events-auto rounded-2xl sm:rounded-3xl bg-slate-950/90 border backdrop-blur-md shadow-2xl p-2 sm:p-2.5 flex flex-col items-center justify-center w-full min-h-[95px] sm:min-h-[110px] ${
           isMyTurn
             ? 'border-sky-400/60 ring-2 ring-sky-400/30 shadow-[0_0_25px_rgba(56,189,248,0.25)]'
             : 'border-white/10'
         }`}
       >
         {/* Discard Tray Header */}
-        <div className="flex items-center justify-between w-full px-1 pb-1 text-[8px] sm:text-xs text-white/70 border-b border-white/10 select-none">
+        <div className="flex items-center justify-between w-full px-1 pb-1 text-[8px] sm:text-[10px] text-white/70 border-b border-white/10 select-none">
           <span className="font-extrabold tracking-wider text-sky-400 uppercase">
             Round {roundNumber}
           </span>
 
-          {leadSuit ? (
+          {hasPreviousCards ? (
+            <span className="text-amber-300/90 font-bold text-[7px] sm:text-[9px] uppercase tracking-wide">
+              Last Discards
+            </span>
+          ) : leadSuit ? (
             <span
-              className={`font-extrabold flex items-center gap-1 px-2 py-0.5 rounded-full border shadow-sm ${SUIT_THEME[leadSuit].bgBadgeClass}`}
+              className={`font-extrabold flex items-center gap-1 px-1.5 py-0.5 rounded-full border shadow-sm ${SUIT_THEME[leadSuit].bgBadgeClass}`}
             >
-              <span className="opacity-75 text-[7px] sm:text-[9px] uppercase tracking-wider">Lead:</span>
-              <SuitIcon suit={leadSuit} className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5" />
-              <span className="text-[8px] sm:text-[11px] font-black uppercase tracking-wide">
+              <span className="opacity-75 text-[7px] sm:text-[8px] uppercase tracking-wider">Lead:</span>
+              <SuitIcon suit={leadSuit} className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+              <span className="text-[7px] sm:text-[9px] font-black uppercase tracking-wide">
                 {SUIT_THEME[leadSuit].name}
               </span>
             </span>
           ) : (
-            <span className="text-white/50 italic text-[7px] sm:text-[10px]">Waiting for lead</span>
+            <span className="text-white/50 italic text-[7px] sm:text-[9px]">Waiting for lead</span>
           )}
 
-          <span className="text-white/60 font-medium text-[8px] sm:text-[10px]">
-            {hasCurrentCards ? `${centerPile.length} cards` : 'Table open'}
+          <span className="text-white/60 font-medium text-[7px] sm:text-[9px]">
+            {hasCurrentCards ? `${centerPile.length} cards` : hasPreviousCards ? `${lastRoundPile.length} cards` : 'Table open'}
           </span>
         </div>
 
-        {/* Current Round Discards — side-by-side with full visibility */}
+        {/* Current Round Discards — wrapped into neat rows that never exceed safe width */}
         {hasCurrentCards ? (
-          <div className="flex items-center justify-center gap-1 sm:gap-2 flex-wrap py-1.5 w-full">
+          <div className="flex items-center justify-center gap-1 sm:gap-1.5 flex-wrap py-1 w-full">
             <AnimatePresence>
               {centerPile.map((tc, i) => {
                 const isLead = i === 0;
@@ -93,15 +97,15 @@ export default function CenterPile({
                   >
                     {/* Role Badges */}
                     {isHit ? (
-                      <span className="absolute -top-2 z-30 bg-rose-600 text-white font-extrabold text-[6px] sm:text-[8px] px-1.5 py-0.5 rounded-full shadow-lg border border-white/40 tracking-wider uppercase animate-bounce">
+                      <span className="absolute -top-2 z-30 bg-rose-600 text-white font-extrabold text-[6px] sm:text-[7px] px-1.5 py-0.5 rounded-full shadow-lg border border-white/40 tracking-wider uppercase animate-bounce">
                         HIT!
                       </span>
                     ) : isBiggest ? (
-                      <span className="absolute -top-2 z-30 bg-amber-400 text-slate-950 font-extrabold text-[6px] sm:text-[8px] px-1.5 py-0.5 rounded-full shadow-lg border border-amber-200 tracking-wider uppercase">
+                      <span className="absolute -top-2 z-30 bg-amber-400 text-slate-950 font-extrabold text-[6px] sm:text-[7px] px-1.5 py-0.5 rounded-full shadow-lg border border-amber-200 tracking-wider uppercase">
                         BIGGEST
                       </span>
                     ) : isLead ? (
-                      <span className="absolute -top-2 z-30 bg-sky-500 text-white font-bold text-[6px] sm:text-[8px] px-1.5 py-0.5 rounded-full shadow border border-white/30 tracking-wider uppercase">
+                      <span className="absolute -top-2 z-30 bg-sky-500 text-white font-bold text-[6px] sm:text-[7px] px-1.5 py-0.5 rounded-full shadow border border-white/30 tracking-wider uppercase">
                         LEAD
                       </span>
                     ) : null}
@@ -109,7 +113,7 @@ export default function CenterPile({
                     <PlayingCard
                       card={tc.card}
                       size="sm"
-                      className={`transition-all duration-300 sm:scale-110 ${
+                      className={`transition-all duration-300 ${
                         isHit
                           ? 'animate-shake ring-2 ring-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.7)]'
                           : isBiggest
@@ -120,7 +124,7 @@ export default function CenterPile({
 
                     {/* Player label below card */}
                     <span
-                      className={`mt-0.5 text-[7px] sm:text-[8px] font-bold rounded-full px-1.5 py-0.2 truncate max-w-[55px] sm:max-w-[70px] shadow-sm ${
+                      className={`mt-0.5 text-[7px] sm:text-[8px] font-bold rounded-full px-1.5 py-0.2 truncate max-w-[42px] sm:max-w-[48px] shadow-sm ${
                         isHit
                           ? 'bg-rose-950/90 text-rose-200 border border-rose-500/40'
                           : isBiggest
@@ -136,37 +140,34 @@ export default function CenterPile({
             </AnimatePresence>
           </div>
         ) : hasPreviousCards ? (
-          /* When new round just started: show previous round's discards so players can analyse */
-          <div className="w-full flex flex-col items-center py-1.5">
-            <div className="text-[9px] sm:text-xs text-white/60 mb-1.5 font-semibold flex items-center gap-1">
-              <span>Previous Round Discards:</span>
-            </div>
-            <div className="flex items-center justify-center gap-1.5 sm:gap-2.5 flex-wrap max-w-full opacity-85">
+          /* When new round just started: show previous round's discards neatly grouped without overlap */
+          <div className="w-full flex flex-col items-center py-1">
+            <div className="flex items-center justify-center gap-1 sm:gap-1.5 flex-wrap max-w-full opacity-90 my-0.5">
               {lastRoundPile.map((tc) => (
                 <div
                   key={`prev-${tc.playerId}-${tc.card.id}`}
-                  className="flex flex-col items-center scale-90 sm:scale-95"
+                  className="flex flex-col items-center scale-90 sm:scale-95 my-0.5"
                 >
                   <PlayingCard card={tc.card} size="sm" className="shadow-md" />
-                  <span className="mt-0.5 text-[7px] sm:text-[8px] text-white/80 font-medium truncate max-w-[55px]">
+                  <span className="mt-0.5 text-[7px] sm:text-[8px] text-white/80 font-medium truncate max-w-[42px] sm:max-w-[46px]">
                     {tc.playerName}
                   </span>
                 </div>
               ))}
             </div>
             <span
-              className={`mt-2 text-[10px] sm:text-xs font-semibold ${
+              className={`mt-1 text-[8.5px] sm:text-[10px] font-semibold text-center leading-tight ${
                 isMyTurn ? 'text-sky-300 animate-pulse' : 'text-white/40'
               }`}
             >
-              {isMyTurn ? 'Your turn — tap or drag card to lead' : 'Waiting for round leader to discard...'}
+              {isMyTurn ? 'Your turn — lead card' : 'Waiting for round leader to discard...'}
             </span>
           </div>
         ) : (
           /* Fresh game state */
-          <div className="py-4 sm:py-6 text-center">
+          <div className="py-3 sm:py-4 text-center">
             <span
-              className={`text-[11px] sm:text-xs font-medium tracking-wide ${
+              className={`text-[10px] sm:text-[11px] font-medium tracking-wide ${
                 isMyTurn ? 'text-sky-300 font-bold animate-pulse' : 'text-white/40'
               }`}
             >

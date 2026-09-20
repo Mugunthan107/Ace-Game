@@ -255,7 +255,7 @@ console.log('--- Running Game Rules Tests ---');
   console.log('✓ Test 6 Passed: P1 leads with last card, P2 collects hit pile, P1 escapes, P2 leads');
 }
 
-// Test 7: Final 2 players showdown - P2 declares Ass
+// Test 7: Final 2 players showdown - P2 declares Ass / Donkey
 {
   const p1 = createPlayer('p1', 'Player 1', 0, [createCard('hearts', 'K')]);
   const p2 = createPlayer('p2', 'Player 2', 1, [createCard('spades', '2'), createCard('clubs', '3')]);
@@ -285,7 +285,97 @@ console.log('--- Running Game Rules Tests ---');
     'Rankings should order P1 then P2 as last'
   );
   assert(res.gameState.lastEvent?.type === 'game_over', 'Game over event emitted');
-  console.log('✓ Test 7 Passed: Final 2 player Ass button ends game and crowns donkey');
+  console.log('✓ Test 7 Passed: Final 2 player Ass/Donkey button ends game and crowns donkey');
+}
+
+// Test 8: Round 1 Ace of Spades lead rule
+{
+  const p1Ace = createCard('spades', 'A');
+  const p1Other = createCard('hearts', 'K');
+  const p1 = createPlayer('p1', 'Player 1', 0, [p1Ace, p1Other]);
+  const p2 = createPlayer('p2', 'Player 2', 1, [createCard('spades', '10')]);
+  const players = [p1, p2];
+
+  const gs: GameState = {
+    ...emptyGameState(),
+    gameStarted: true,
+    roundNumber: 1,
+    currentLeader: 'p1',
+    currentTurn: 'p1',
+  };
+
+  // Attempting to play non-Ace of Spades on Round 1 lead MUST fail
+  let errorThrown = false;
+  try {
+    applyCardPlay(players, gs, 'p1', p1Other);
+  } catch (_err: any) {
+    errorThrown = true;
+  }
+  assert(errorThrown, 'Round 1 lead must enforce Ace of Spades if held');
+
+  // Playing Ace of Spades succeeds
+  const step1 = applyCardPlay(players, gs, 'p1', p1Ace);
+  assert(step1.gameState.centerPile.length === 1, 'Ace of Spades played onto table');
+  assert(step1.gameState.leadSuit === 'spades', 'Lead suit is Spades');
+  console.log('✓ Test 8 Passed: Round 1 Ace of Spades lead rule strictly enforced');
+}
+
+// Test 9: User exact scenario: P1 leads Spade Ace, P2 plays Spade 10, P3 hits with Heart 5.
+// P1 played the highest card of the lead suit (A > 10), so P1 MUST take ALL cards (A♠, 10♠, 5♥) into hand!
+// Also verifies that gameState.players is atomically synchronized.
+{
+  const p1Ace = createCard('spades', 'A');
+  const p2Spade = createCard('spades', '10');
+  const p3Hit = createCard('hearts', '5'); // HIT!
+
+  const p1 = createPlayer('p1', 'User', 0, [p1Ace, createCard('clubs', '2'), createCard('diamonds', '3')]);
+  const p2 = createPlayer('p2', 'Bot 1', 1, [p2Spade, createCard('clubs', '4')]);
+  const p3 = createPlayer('p3', 'Bot 2', 2, [p3Hit, createCard('diamonds', '9')]); // No spades!
+
+  let players = [p1, p2, p3];
+  let gs: GameState = {
+    ...emptyGameState(),
+    gameStarted: true,
+    roundNumber: 1,
+    currentLeader: 'p1',
+    currentTurn: 'p1',
+  };
+
+  // P1 plays Ace of Spades
+  const r1 = applyCardPlay(players, gs, 'p1', p1Ace);
+  assert(!r1.isPendingResolution, 'r1 continuing');
+
+  // P2 plays 10 of Spades
+  const r2 = applyCardPlay(r1.players, r1.gameState, 'p2', p2Spade);
+  assert(!r2.isPendingResolution, 'r2 continuing');
+
+  // P3 has no Spades and gives HIT with Heart 5!
+  const r3 = applyCardPlay(r2.players, r2.gameState, 'p3', p3Hit);
+  assert(r3.isPendingResolution, 'r3 hit completes trick');
+  assert(r3.resolution!.wasHit, 'Was hit is true');
+  assert(r3.resolution!.collectorId === 'p1', 'P1 played highest lead suit (A), so P1 is collector');
+
+  // Finalize trick resolution
+  const final = finalizeTrickResolution(r3.players, r3.gameState, r3.resolution!);
+  const p1Final = final.players.find(p => p.id === 'p1')!;
+  
+  // P1 started with 3 cards, played 1 (2 remaining), then collected 3 cards (A♠, 10♠, 5♥) -> exactly 5 cards in hand!
+  assert(p1Final.cards.length === 5, `P1 must hold 5 cards, got ${p1Final.cards.length}`);
+  assert(p1Final.cards.some(c => c.id === 'spades-A'), 'P1 must have A♠ back in hand');
+  assert(p1Final.cards.some(c => c.id === 'spades-10'), 'P1 must have 10♠ in hand');
+  assert(p1Final.cards.some(c => c.id === 'hearts-5'), 'P1 must have 5♥ in hand');
+  assert(!p1Final.escaped, 'P1 must not be escaped');
+
+  // Verify atomic gameState.players has identical hand
+  const p1StatePlayer = final.gameState.players ? final.gameState.players.find(p => p.id === 'p1') : null;
+  assert(p1StatePlayer !== null && p1StatePlayer !== undefined && p1StatePlayer.cards.length === 5, 'gameState.players must carry the exact 5 cards for atomic sync');
+
+  // P1 leads next round with any card (leadSuit is null)
+  assert(final.gameState.currentLeader === 'p1', 'P1 (collector) leads next round');
+  assert(final.gameState.currentTurn === 'p1', 'P1 takes next turn');
+  assert(final.gameState.leadSuit === null, 'Lead suit reset to null so P1 can lead with any card');
+  assert(final.gameState.roundNumber === 2, 'Round advanced to 2');
+  console.log('✓ Test 9 Passed: User hit scenario where P1 collects all 3 cards into hand and leads next round');
 }
 
 console.log('--- All Game Rules Tests Passed Successfully! ---');

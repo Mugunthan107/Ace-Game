@@ -171,20 +171,33 @@ export function roomSync(
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
-      (payload) => {
+      async (payload) => {
         if (payload.eventType === 'DELETE') {
           onRoomDeleted();
         } else {
-          onRoomChange(payload.new as RoomRow);
+          const room = payload.new as RoomRow;
+          onRoomChange(room);
+          if (room.game_state?.players && room.game_state.players.length > 0) {
+            onPlayersChange(room.game_state.players);
+          }
+          // Asynchronously re-fetch players to ensure database parity
+          fetchPlayers(roomId).then(onPlayersChange).catch(() => {});
         }
       }
     )
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'players', filter: `room_id=eq.${roomId}` },
-      async () => {
-        const players = await fetchPlayers(roomId);
-        onPlayersChange(players);
+      { event: '*', schema: 'public', table: 'players' },
+      async (payload) => {
+        const row = (payload.new || payload.old) as any;
+        if (!row || !row.room_id || row.room_id === roomId) {
+          try {
+            const players = await fetchPlayers(roomId);
+            onPlayersChange(players);
+          } catch {
+            // best-effort fetch
+          }
+        }
       }
     )
     .subscribe();

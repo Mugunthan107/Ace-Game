@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Card, PlayerRow, RoomRow, CardRequest } from '../types';
+import { Card, PlayerRow, RoomRow, CardRequest, GameState } from '../types';
 import { applyCardPlay, finalizeTrickResolution, startGameDeal, applyCardTransfer, declarePlayerAss } from '../engine/gameRules';
 import { chooseBotCard, isBot } from '../engine/bot';
 import {
@@ -16,6 +16,7 @@ import {
   updatePlayer,
   updateRoom,
 } from '../engine/sync';
+import { useVoiceStore } from './voiceStore';
 
 const SESSION_KEY = 'ass_session_v1';
 
@@ -180,10 +181,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const unsub = roomSync(
         room.id,
         (r) => {
-          set({ room: r });
+          const incomingPlayers = r.game_state?.players;
+          if (incomingPlayers && incomingPlayers.length > 0) {
+            set({ room: r, players: incomingPlayers });
+          } else {
+            set({ room: r });
+          }
           triggerBotTurnIfNeeded(get);
         },
         () => {
+          useVoiceStore.getState().leaveVoice();
           set({ room: null, players: [], view: 'landing' });
           clearSession();
         },
@@ -209,10 +216,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const unsub = roomSync(
         room.id,
         (r) => {
-          set({ room: r });
+          const incomingPlayers = r.game_state?.players;
+          if (incomingPlayers && incomingPlayers.length > 0) {
+            set({ room: r, players: incomingPlayers });
+          } else {
+            set({ room: r });
+          }
           triggerBotTurnIfNeeded(get);
         },
         () => {
+          useVoiceStore.getState().leaveVoice();
           set({ room: null, players: [], view: 'landing' });
           clearSession();
         },
@@ -247,10 +260,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const unsub = roomSync(
         room.id,
         (r) => {
-          set({ room: r });
+          const incomingPlayers = r.game_state?.players;
+          if (incomingPlayers && incomingPlayers.length > 0) {
+            set({ room: r, players: incomingPlayers });
+          } else {
+            set({ room: r });
+          }
           triggerBotTurnIfNeeded(get);
         },
         () => {
+          useVoiceStore.getState().leaveVoice();
           set({ room: null, players: [], view: 'landing' });
           clearSession();
         },
@@ -269,6 +288,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   leaveRoom: async () => {
     const { room, myId, unsubscribe, players } = get();
+    useVoiceStore.getState().leaveVoice();
     if (unsubscribe) unsubscribe();
     clearSession();
     set({ room: null, players: [], myId: null, view: 'landing', unsubscribe: null });
@@ -300,6 +320,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   cancelRoom: async () => {
     const { room, unsubscribe } = get();
+    useVoiceStore.getState().leaveVoice();
     if (!room) return;
     if (unsubscribe) unsubscribe();
     clearSession();
@@ -392,7 +413,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const { room: currentRoom, players: currentPlayers } = get();
       if (!currentRoom) return;
 
-      const step2 = finalizeTrickResolution(currentPlayers, currentRoom.game_state, resolution);
+      // Ensure we use the exact centerPile from step1 that ended the trick
+      const trickGameState: GameState = {
+        ...currentRoom.game_state,
+        centerPile: step1.gameState.centerPile,
+        leadSuit: step1.gameState.leadSuit,
+      };
+
+      const step2 = finalizeTrickResolution(currentPlayers, trickGameState, resolution);
 
       // Optimistic collection update: pile transfers to collector
       set({

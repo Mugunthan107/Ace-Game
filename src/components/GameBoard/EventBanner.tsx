@@ -36,10 +36,12 @@ export default function EventBanner({ event, at }: { event: GameEvent | null; at
             animate={{ opacity: 1, scale: [0.7, 1.15, 1], y: 0 }}
             exit={{ opacity: 0, scale: 0.8, y: -10 }}
             transition={{ duration: 0.32, ease: 'easeOut' }}
-            className="inline-flex items-center justify-center gap-2 px-6 py-2 rounded-full bg-gradient-to-r from-red-600 via-rose-600 to-red-600 border border-rose-300/60 text-white font-black text-sm sm:text-base tracking-widest shadow-[0_0_30px_rgba(225,29,72,0.7)] uppercase"
+            className="inline-flex items-center justify-center gap-2 px-5 py-2 rounded-full bg-gradient-to-r from-red-600 via-rose-600 to-red-600 border border-rose-300/60 text-white font-black text-xs sm:text-sm tracking-wide shadow-[0_0_30px_rgba(225,29,72,0.7)]"
           >
             <span className="text-base sm:text-lg animate-bounce">💥</span>
-            <span>HIT!</span>
+            <span>
+              HIT! {event.collectorName ? `${event.collectorName} takes all ${event.cardCount ?? ''} cards!` : ''}
+            </span>
           </motion.div>
         )}
       </AnimatePresence>

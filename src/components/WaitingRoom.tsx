@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { HiOutlineClipboard, HiOutlineCheck, HiOutlineShare, HiOutlineX, HiOutlineLogout } from 'react-icons/hi';
 import { GiCrown } from 'react-icons/gi';
+import { BsMicFill, BsMicMuteFill } from 'react-icons/bs';
 import { useGameStore } from '../store/gameStore';
+import { useVoiceStore } from '../store/voiceStore';
 import FloatingCards from './common/FloatingCards';
+import VoiceControlBar from './common/VoiceControlBar';
 
 export default function WaitingRoom() {
   const room = useGameStore((s) => s.room);
@@ -17,8 +20,20 @@ export default function WaitingRoom() {
   const [copied, setCopied] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
 
-  if (!room) return null;
+  const initVoice = useVoiceStore((s) => s.initVoice);
+  const isLocalMicOn = useVoiceStore((s) => s.isMicOn);
+  const isLocalSpeaking = useVoiceStore((s) => s.isSpeaking);
+  const remotePlayers = useVoiceStore((s) => s.remotePlayers);
+
   const me = players.find((p) => p.id === myId);
+
+  useEffect(() => {
+    if (room?.id && me?.id) {
+      initVoice(room.id, me.id, me.name);
+    }
+  }, [room?.id, me?.id, me?.name, initVoice]);
+
+  if (!room) return null;
   const isHost = me?.is_host ?? false;
   const botsNeeded = Math.max(0, room.max_players - players.length);
   const canStart = isHost ? players.length >= 1 && room.max_players >= 4 : players.length >= 4;
@@ -48,10 +63,10 @@ export default function WaitingRoom() {
   };
 
   const share = async () => {
-    const text = `Join my ASS game! Room code: ${room.code}`;
+    const text = `Join my Donkey game! Room code: ${room.code}`;
     if (navigator.share) {
       try {
-        await navigator.share({ title: 'ASS — Join my room', text });
+        await navigator.share({ title: 'Donkey — Join my room', text });
       } catch {
         /* user cancelled */
       }
@@ -94,43 +109,89 @@ export default function WaitingRoom() {
           </button>
         </div>
 
+        {/* Voice Communication Bar */}
+        <div className="w-full mt-3 flex justify-center">
+          <VoiceControlBar />
+        </div>
+
         <div className="w-full mt-4">
           <div className="grid grid-cols-3 gap-2.5 sm:gap-3">
-            {players.map((p) => (
-              <motion.div
-                key={p.id}
-                initial={{ opacity: 0, scale: 0.85 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="flex flex-col items-center gap-1"
-              >
-                <div className="relative">
-                  <div
-                    className="w-11 h-11 sm:w-13 sm:h-13 rounded-full flex items-center justify-center font-display font-bold text-white text-base sm:text-lg shadow-md"
-                    style={{ background: p.avatar_color }}
-                  >
-                    {p.name.slice(0, 1).toUpperCase()}
-                  </div>
-                  {p.is_host && (
-                    <span className="absolute -top-1.5 -right-1 text-amber-300 text-base drop-shadow">
-                      <GiCrown />
-                    </span>
-                  )}
-                  {isHost && p.id !== myId && (
-                    <button
-                      onClick={() => removePlayer(p.id)}
-                      className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center text-[9px] shadow"
-                      aria-label={`Remove ${p.name}`}
+            {players.map((p) => {
+              const isPlayerMe = p.id === myId;
+              const pVoice = isPlayerMe
+                ? { isMicOn: isLocalMicOn, isSpeaking: isLocalSpeaking }
+                : remotePlayers[p.id];
+              const pMicOn = pVoice?.isMicOn ?? false;
+              const pSpeaking = pVoice?.isSpeaking ?? false;
+
+              return (
+                <motion.div
+                  key={p.id}
+                  initial={{ opacity: 0, scale: 0.85 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="flex flex-col items-center gap-1"
+                >
+                  <div className="relative">
+                    {/* Speaking radiant wave */}
+                    {pSpeaking && (
+                      <span className="absolute -inset-1.5 rounded-full border-2 border-emerald-400 animate-ping opacity-75 pointer-events-none" />
+                    )}
+
+                    <div
+                      className={`w-11 h-11 sm:w-13 sm:h-13 rounded-full flex items-center justify-center font-display font-bold text-white text-base sm:text-lg shadow-md transition-all ${
+                        pSpeaking
+                          ? 'ring-4 ring-emerald-400 border-2 border-emerald-300'
+                          : 'border-2 border-white/20'
+                      }`}
+                      style={{ background: p.avatar_color }}
                     >
-                      <HiOutlineX />
-                    </button>
-                  )}
-                </div>
-                <p className="text-white text-[11px] font-medium truncate max-w-[70px] text-center leading-tight">
-                  {p.name}
-                  {p.is_host ? ' (Host)' : ''}
-                </p>
-              </motion.div>
-            ))}
+                      {p.name.slice(0, 1).toUpperCase()}
+                    </div>
+
+                    {/* Mic status badge */}
+                    {!p.is_bot && (
+                      <span
+                        className={`absolute -bottom-1 -left-1 w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full flex items-center justify-center text-[7px] sm:text-[8px] shadow border transition-colors ${
+                          pSpeaking
+                            ? 'bg-emerald-500 text-slate-950 border-white ring-2 ring-emerald-300 animate-pulse'
+                            : pMicOn
+                            ? 'bg-emerald-600 text-white border-white/70'
+                            : 'bg-rose-600 text-white border-white/70'
+                        }`}
+                        title={
+                          pSpeaking
+                            ? `${p.name} is speaking`
+                            : pMicOn
+                            ? `${p.name}: Mic is on`
+                            : `${p.name}: Mic is muted`
+                        }
+                      >
+                        {pMicOn ? <BsMicFill /> : <BsMicMuteFill />}
+                      </span>
+                    )}
+
+                    {p.is_host && (
+                      <span className="absolute -top-1.5 -right-1 text-amber-300 text-base drop-shadow">
+                        <GiCrown />
+                      </span>
+                    )}
+                    {isHost && p.id !== myId && (
+                      <button
+                        onClick={() => removePlayer(p.id)}
+                        className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center text-[9px] shadow"
+                        aria-label={`Remove ${p.name}`}
+                      >
+                        <HiOutlineX />
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-white text-[11px] font-medium truncate max-w-[70px] text-center leading-tight">
+                    {p.name}
+                    {p.is_host ? ' (Host)' : ''}
+                  </p>
+                </motion.div>
+              );
+            })}
             {Array.from({ length: Math.max(0, room.max_players - players.length) }).map((_, i) => (
               <div key={`empty-${i}`} className="flex flex-col items-center gap-1 opacity-35">
                 <div className="w-11 h-11 sm:w-13 sm:h-13 rounded-full border-2 border-dashed border-white/40" />

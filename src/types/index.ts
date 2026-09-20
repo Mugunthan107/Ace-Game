@@ -118,7 +118,14 @@ export interface CardRequest {
   createdAt: number;
 }
 
+
+
+
+
+
+
 export interface GameState {
+  players?: PlayerRow[];
   discardPile: Card[];
   centerPile: TrickCard[];
   lastRoundPile?: TrickCard[];
@@ -163,6 +170,7 @@ export const AVATAR_COLORS = [
 
 export function emptyGameState(): GameState {
   return {
+    players: [],
     discardPile: [],
     centerPile: [],
     lastRoundPile: [],

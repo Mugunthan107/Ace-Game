@@ -50,7 +50,7 @@ export default function EndGameModal({ players, rankings, donkeyId, isHost, onPl
                 <div className="flex items-center gap-2">
                   <span className="w-6 text-center">{MEDALS[i] ?? `${place}.`}</span>
                   <span className="text-white text-sm font-semibold">
-                    {p.name} {isDonkey ? '(ASS)' : '(Escaped)'}
+                    {p.name} {isDonkey ? '(Donkey)' : '(Escaped)'}
                   </span>
                 </div>
                 {isDonkey && <GiDonkey className="text-red-300 text-lg" />}
@@ -61,7 +61,7 @@ export default function EndGameModal({ players, rankings, donkeyId, isHost, onPl
 
         {donkeyId && (
           <p className="mt-5 font-display font-extrabold text-2xl text-gradient">
-            {byId.get(donkeyId)?.id ? `${byId.get(donkeyId)?.name.toUpperCase()} IS THE ASS! 🫏` : ''}
+            {byId.get(donkeyId)?.id ? `${byId.get(donkeyId)?.name.toUpperCase()} IS THE DONKEY! 🫏` : ''}
           </p>
         )}
 

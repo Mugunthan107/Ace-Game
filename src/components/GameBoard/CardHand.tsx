@@ -8,6 +8,7 @@ import PlayingCard from './PlayingCard';
 interface Props {
   hand: Card[];
   leadSuit: Suit | null;
+  roundNumber?: number;
   isMyTurn: boolean;
   onPlay: (card: Card) => void;
   escaped?: boolean;
@@ -29,10 +30,10 @@ function useIsMobile(breakpoint = 640) {
   return isMobile;
 }
 
-export default function CardHand({ hand, leadSuit, isMyTurn, onPlay, escaped }: Props) {
+export default function CardHand({ hand, leadSuit, roundNumber, isMyTurn, onPlay, escaped }: Props) {
   // Always sort and group hand cards: Spades, Hearts, Clubs, Diamonds; within suit A -> 2
   const sortedHand = useMemo(() => sortHand(hand), [hand]);
-  const legal = isMyTurn ? legalCardIds(sortedHand, leadSuit) : new Set<string>();
+  const legal = isMyTurn ? legalCardIds(sortedHand, leadSuit, roundNumber) : new Set<string>();
   const [isDragging, setIsDragging] = useState(false);
   const setToast = useGameStore((s) => s.setToast);
   const isMobile = useIsMobile(640);
@@ -92,6 +93,8 @@ export default function CardHand({ hand, leadSuit, isMyTurn, onPlay, escaped }: 
     if (!isMyTurn) return;
     if (legal.has(card.id)) {
       onPlay(card);
+    } else if (roundNumber === 1 && !leadSuit) {
+      setToast('Must lead with the Ace of Spades ♠');
     } else if (leadSuit) {
       setToast(`Must follow ${SUIT_THEME[leadSuit].name.toUpperCase()} ${SUIT_THEME[leadSuit].symbol}`);
     }

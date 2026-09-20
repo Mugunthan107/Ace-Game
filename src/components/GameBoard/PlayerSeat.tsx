@@ -1,8 +1,11 @@
 import { motion } from 'framer-motion';
 import { GiCrown, GiDonkey } from 'react-icons/gi';
 import { HiOutlineTrophy } from 'react-icons/hi2';
+import { BsMicFill, BsMicMuteFill } from 'react-icons/bs';
+import { HiSpeakerXMark } from 'react-icons/hi2';
 import { PlayerRow } from '../../types';
 import { isBot } from '../../engine/bot';
+import { useVoiceStore } from '../../store/voiceStore';
 
 interface Props {
   player: PlayerRow;
@@ -24,6 +27,16 @@ export default function PlayerSeat({
   onClick,
 }: Props) {
   const isCrowded = totalPlayers >= 7;
+  const isHuman = !isBot(player);
+
+  const isLocalMicOn = useVoiceStore((s) => s.isMicOn);
+  const isLocalSpeaking = useVoiceStore((s) => s.isSpeaking);
+  const isLocalSpeakerOn = useVoiceStore((s) => s.isSpeakerOn);
+  const remotePlayerState = useVoiceStore((s) => s.remotePlayers[player.id]);
+
+  const isPlayerMicOn = isMe ? isLocalMicOn : (remotePlayerState?.isMicOn ?? false);
+  const isPlayerSpeaking = isMe ? isLocalSpeaking : (remotePlayerState?.isSpeaking ?? false);
+  const isPlayerSpeakerOn = isMe ? isLocalSpeakerOn : (remotePlayerState?.isSpeakerOn ?? true);
 
   return (
     <div
@@ -36,6 +49,14 @@ export default function PlayerSeat({
       }`}
     >
       <div className="relative flex flex-col items-center">
+        {/* Speaking radiant voice wave */}
+        {isPlayerSpeaking && (
+          <>
+            <span className="absolute -inset-2.5 sm:-inset-3.5 rounded-full border-2 border-emerald-400 animate-ping opacity-60 pointer-events-none" />
+            <span className="absolute -inset-2 sm:-inset-3 rounded-full bg-emerald-400/40 blur-md animate-pulse pointer-events-none" />
+          </>
+        )}
+
         {/* Radiant Turn Glowing Auras & Expanding Radar Waves */}
         {isTurn && (
           <>
@@ -65,7 +86,9 @@ export default function PlayerSeat({
           className={`relative rounded-full flex items-center justify-center font-display font-bold text-white transition-all
             ${isCrowded ? 'w-8 h-8 sm:w-11 sm:h-11 text-xs sm:text-sm' : 'w-9 h-9 sm:w-12 sm:h-12 text-xs sm:text-base'}
             ${
-              isTurn
+              isPlayerSpeaking
+                ? 'border-2 border-emerald-300 ring-4 ring-emerald-400 shadow-[0_0_24px_rgba(52,211,153,0.9)]'
+                : isTurn
                 ? 'border-2 border-white ring-4 ring-sky-300 shadow-[0_0_25px_rgba(56,189,248,1),0_0_50px_rgba(14,165,233,0.7)] animate-turn-glow'
                 : isMe
                 ? 'border-2 border-sky-400/80 ring-2 ring-sky-400/40 shadow-[0_0_10px_rgba(56,189,248,0.4)]'
@@ -78,12 +101,44 @@ export default function PlayerSeat({
           {player.name.slice(0, 1).toUpperCase()}
 
           {/* Bot indicator */}
-          {isBot(player) && (
+          {!isHuman && (
             <span
               className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 sm:w-4.5 sm:h-4.5 rounded-full bg-slate-900 text-sky-300 flex items-center justify-center text-[8px] sm:text-[9px] shadow border border-sky-400/40"
               title="Bot"
             >
               🤖
+            </span>
+          )}
+
+          {/* Voice status badge for human players */}
+          {isHuman && (
+            <span
+              className={`absolute -bottom-1 -left-1 w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full flex items-center justify-center text-[7px] sm:text-[8px] shadow border transition-colors ${
+                isPlayerSpeaking
+                  ? 'bg-emerald-500 text-slate-950 border-white ring-2 ring-emerald-300 animate-pulse'
+                  : isPlayerMicOn
+                  ? 'bg-emerald-600 text-white border-white/70'
+                  : 'bg-rose-600 text-white border-white/70'
+              }`}
+              title={
+                isPlayerSpeaking
+                  ? `${player.name} is speaking`
+                  : isPlayerMicOn
+                  ? `${player.name}: Mic is on`
+                  : `${player.name}: Mic is muted`
+              }
+            >
+              {isPlayerMicOn ? <BsMicFill /> : <BsMicMuteFill />}
+            </span>
+          )}
+
+          {/* Deafened indicator badge */}
+          {isHuman && !isPlayerSpeakerOn && (
+            <span
+              className="absolute -bottom-1 -right-1 w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full bg-rose-600 text-white flex items-center justify-center text-[7px] sm:text-[8px] shadow border border-white/70"
+              title={`${player.name} has sound muted`}
+            >
+              <HiSpeakerXMark />
             </span>
           )}
 
