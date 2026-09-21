@@ -179,18 +179,19 @@ export function roomSync(
           onRoomChange(room);
           if (room.game_state?.players && room.game_state.players.length > 0) {
             onPlayersChange(room.game_state.players);
+          } else if (room.status === 'waiting') {
+            // Only re-fetch waiting room players if not yet in game_state
+            fetchPlayers(roomId).then(onPlayersChange).catch(() => {});
           }
-          // Asynchronously re-fetch players to ensure database parity
-          fetchPlayers(roomId).then(onPlayersChange).catch(() => {});
         }
       }
     )
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'players' },
+      { event: '*', schema: 'public', table: 'players', filter: `room_id=eq.${roomId}` },
       async (payload) => {
         const row = (payload.new || payload.old) as any;
-        if (!row || !row.room_id || row.room_id === roomId) {
+        if (!row || row.room_id === roomId) {
           try {
             const players = await fetchPlayers(roomId);
             onPlayersChange(players);

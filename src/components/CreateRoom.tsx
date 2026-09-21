@@ -57,7 +57,7 @@ export default function CreateRoom() {
             onChange={(e) => setMaxPlayers(Number(e.target.value))}
             className="mt-2 w-full rounded-xl px-4 py-3 bg-slate-900/70 border border-cyan-500/30 text-white outline-none focus:ring-2 focus:ring-cyan-400 transition-all"
           >
-            {Array.from({ length: 7 }, (_, i) => i + 4).map((n) => (
+            {Array.from({ length: 9 }, (_, i) => i + 2).map((n) => (
               <option key={n} value={n} className="bg-slate-900 text-white">
                 {n} Players
               </option>

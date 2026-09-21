@@ -64,6 +64,7 @@ interface GameStore {
   removePlayer: (playerId: string) => Promise<void>;
   cancelRoom: () => Promise<void>;
   startGame: () => Promise<void>;
+  updateMaxPlayers: (maxPlayers: number) => Promise<void>;
   executePlay: (actorId: string, card: Card) => Promise<void>;
   playCard: (card: Card) => Promise<void>;
   playBotTurn: (botPlayer: PlayerRow) => Promise<void>;
@@ -181,6 +182,28 @@ function mergeIncomingRoom(currentRoom: RoomRow | null, incomingRoom: RoomRow): 
   return incomingRoom;
 }
 
+function arePlayersEqual(a: PlayerRow[] | undefined, b: PlayerRow[] | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const p1 = a[i];
+    const p2 = b[i];
+    if (
+      p1.id !== p2.id ||
+      p1.cards.length !== p2.cards.length ||
+      p1.escaped !== p2.escaped ||
+      p1.escape_rank !== p2.escape_rank ||
+      p1.is_host !== p2.is_host ||
+      p1.seat_order !== p2.seat_order ||
+      p1.name !== p2.name ||
+      p1.ready !== p2.ready
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export const useGameStore = create<GameStore>((set, get) => ({
   view: 'landing',
   room: null,
@@ -211,7 +234,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
           const finalRoom = mergeIncomingRoom(get().room, r);
           const incomingPlayers = finalRoom.game_state?.players;
           if (incomingPlayers && incomingPlayers.length > 0) {
-            set({ room: finalRoom, players: incomingPlayers });
+            if (arePlayersEqual(get().players, incomingPlayers)) {
+              set({ room: finalRoom });
+            } else {
+              set({ room: finalRoom, players: incomingPlayers });
+            }
           } else {
             set({ room: finalRoom });
           }
@@ -223,8 +250,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
           clearSession();
         },
         (ps) => {
-          set({ players: ps });
-          triggerBotTurnIfNeeded(get);
+          if (!arePlayersEqual(get().players, ps)) {
+            set({ players: ps });
+            triggerBotTurnIfNeeded(get);
+          }
         }
       );
       saveSession({ roomId: room.id, roomCode: room.code, playerId: player.id });
@@ -247,7 +276,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
           const finalRoom = mergeIncomingRoom(get().room, r);
           const incomingPlayers = finalRoom.game_state?.players;
           if (incomingPlayers && incomingPlayers.length > 0) {
-            set({ room: finalRoom, players: incomingPlayers });
+            if (arePlayersEqual(get().players, incomingPlayers)) {
+              set({ room: finalRoom });
+            } else {
+              set({ room: finalRoom, players: incomingPlayers });
+            }
           } else {
             set({ room: finalRoom });
           }
@@ -259,8 +292,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
           clearSession();
         },
         (ps) => {
-          set({ players: ps });
-          triggerBotTurnIfNeeded(get);
+          if (!arePlayersEqual(get().players, ps)) {
+            set({ players: ps });
+            triggerBotTurnIfNeeded(get);
+          }
         }
       );
       saveSession({ roomId: room.id, roomCode: room.code, playerId: player.id });
@@ -292,7 +327,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
           const finalRoom = mergeIncomingRoom(get().room, r);
           const incomingPlayers = finalRoom.game_state?.players;
           if (incomingPlayers && incomingPlayers.length > 0) {
-            set({ room: finalRoom, players: incomingPlayers });
+            if (arePlayersEqual(get().players, incomingPlayers)) {
+              set({ room: finalRoom });
+            } else {
+              set({ room: finalRoom, players: incomingPlayers });
+            }
           } else {
             set({ room: finalRoom });
           }
@@ -304,8 +343,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
           clearSession();
         },
         (ps) => {
-          set({ players: ps });
-          triggerBotTurnIfNeeded(get);
+          if (!arePlayersEqual(get().players, ps)) {
+            set({ players: ps });
+            triggerBotTurnIfNeeded(get);
+          }
         }
       );
       set({ room, players, myId: me.id, view: 'game', unsubscribe: unsub });
@@ -376,8 +417,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         set({ players: allPlayers });
       }
 
-      if (allPlayers.length < 4) {
-        set({ error: 'Need at least 4 players to start.', loading: false });
+      if (allPlayers.length < 2) {
+        set({ error: 'Need at least 2 players to start.', loading: false });
         return;
       }
 
@@ -406,6 +447,24 @@ export const useGameStore = create<GameStore>((set, get) => ({
         error: err?.message || 'Failed to start game. Please try again.',
       });
       throw err;
+    }
+  },
+
+  updateMaxPlayers: async (maxPlayers: number) => {
+    const { room, myId, players } = get();
+    if (!room || !myId) return;
+    const me = players.find((p) => p.id === myId);
+    const isHost = me?.is_host || room.host_id === myId;
+    if (!isHost) return;
+
+    const minLimit = Math.max(2, players.length);
+    const clamped = Math.min(10, Math.max(minLimit, maxPlayers));
+    try {
+      await updateRoom(room.id, { max_players: clamped });
+      set({ room: { ...room, max_players: clamped } });
+    } catch (err: any) {
+      console.error('Failed to update player capacity:', err);
+      set({ toast: 'Failed to update capacity' });
     }
   },
 

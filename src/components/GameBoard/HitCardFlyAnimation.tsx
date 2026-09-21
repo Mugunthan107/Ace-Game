@@ -10,17 +10,30 @@ interface Props {
   isMe: boolean;
 }
 
+let sharedSwooshAudioCtx: AudioContext | null = null;
+
+function getSharedSwooshCtx(): AudioContext | null {
+  try {
+    if (!sharedSwooshAudioCtx) {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) sharedSwooshAudioCtx = new AudioCtx();
+    }
+    if (sharedSwooshAudioCtx && sharedSwooshAudioCtx.state === 'suspended') {
+      sharedSwooshAudioCtx.resume().catch(() => {});
+    }
+    return sharedSwooshAudioCtx;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Synthesizes a soft physical card-dealing swoosh sound using Web Audio API.
  */
 function playCardSwooshSound(pitchMultiplier = 1.0) {
   try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
-    if (ctx.state === 'suspended') {
-      ctx.resume().catch(() => {});
-    }
+    const ctx = getSharedSwooshCtx();
+    if (!ctx) return;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 

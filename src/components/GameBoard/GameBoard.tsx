@@ -92,19 +92,12 @@ export default function GameBoard() {
     return getAnticlockwiseSeatPosition(relIdx, seated.length);
   }, [hitCollector, seated, myIdx]);
 
-  // If a card is played while target menu is open, immediately close target menu
-  useEffect(() => {
-    if (isRoundActive && selectedTarget) {
-      setSelectedTarget(null);
-    }
-  }, [isRoundActive, selectedTarget]);
-
   // Automated bot turns managed by store orchestrator — fast, robust, no hanging
   useEffect(() => {
-    if (room && me) {
+    if (me?.is_host) {
       triggerBotTurnIfNeeded(useGameStore.getState);
     }
-  }, [gs?.currentTurn, gs?.roundNumber, gs?.centerPile.length, gs?.gameEnded, me?.is_host, room, me]);
+  }, [gs?.currentTurn, gs?.roundNumber, gs?.centerPile.length, gs?.gameEnded, me?.is_host]);
 
   if (!room || !me || !gs) return null;
 
@@ -283,7 +276,7 @@ export default function GameBoard() {
       {/* Card Deal (Buy / Give All Cards) Modal & Action Popover */}
       <CardDealModal
         cardRequest={gs.cardRequest}
-        selectedTarget={selectedTarget}
+        selectedTarget={isRoundActive ? null : selectedTarget}
         myId={me.id}
         canBuyCards={!isRoundActive}
         onCloseTargetMenu={() => setSelectedTarget(null)}

@@ -9,7 +9,6 @@ export default function EventBanner({ event, at }: { event: GameEvent | null; at
   useEffect(() => {
     // Only trigger popup for HIT events when a player gets hit
     if (!event || event.type !== 'hit') {
-      setVisible(false);
       return;
     }
 

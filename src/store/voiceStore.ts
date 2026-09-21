@@ -724,20 +724,32 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
       const { playerId, playerName, isMicOn, isSpeakerOn, isSpeaking, joined } = payload;
       if (!playerId || playerId === get().myId) return;
 
-      console.log('[Voice] Presence from', playerName, '(' + playerId.substring(0, 8) + ')', joined ? '(joined)' : '');
+      const current = get().remotePlayers[playerId];
+      const nextMicOn = Boolean(isMicOn);
+      const nextSpeakerOn = isSpeakerOn !== false;
+      const nextSpeaking = Boolean(isSpeaking);
+      const nextName = playerName || 'Player';
 
-      set((state) => ({
-        remotePlayers: {
-          ...state.remotePlayers,
-          [playerId]: {
-            playerId,
-            playerName: playerName || 'Player',
-            isMicOn: Boolean(isMicOn),
-            isSpeakerOn: isSpeakerOn !== false,
-            isSpeaking: Boolean(isSpeaking),
+      if (
+        !current ||
+        current.isMicOn !== nextMicOn ||
+        current.isSpeakerOn !== nextSpeakerOn ||
+        current.isSpeaking !== nextSpeaking ||
+        current.playerName !== nextName
+      ) {
+        set((state) => ({
+          remotePlayers: {
+            ...state.remotePlayers,
+            [playerId]: {
+              playerId,
+              playerName: nextName,
+              isMicOn: nextMicOn,
+              isSpeakerOn: nextSpeakerOn,
+              isSpeaking: nextSpeaking,
+            },
           },
-        },
-      }));
+        }));
+      }
 
       // Ensure peer connection exists
       const currentMyId = get().myId || '';

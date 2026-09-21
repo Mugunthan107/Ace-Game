@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { motion } from 'framer-motion';
 import { GiCrown, GiDonkey } from 'react-icons/gi';
 import { HiOutlineTrophy } from 'react-icons/hi2';
@@ -17,7 +18,7 @@ interface Props {
   onClick?: () => void;
 }
 
-export default function PlayerSeat({
+function PlayerSeat({
   player,
   isTurn,
   isMe,
@@ -206,3 +207,5 @@ export default function PlayerSeat({
     </div>
   );
 }
+
+export default memo(PlayerSeat);
