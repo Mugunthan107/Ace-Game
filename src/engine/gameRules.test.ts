@@ -1,5 +1,5 @@
-import { applyCardPlay, finalizeTrickResolution, declarePlayerAss } from './gameRules';
-import { Card, emptyGameState, GameState, PlayerRow } from '../types';
+import { applyCardPlay, finalizeTrickResolution, declarePlayerAss, applyCardTransfer } from './gameRules';
+import { Card, emptyGameState, GameState, PlayerRow, CardRequest } from '../types';
 
 function createCard(suit: 'spades' | 'hearts' | 'clubs' | 'diamonds', rank: any): Card {
   return { id: `${suit}-${rank}`, suit, rank };
@@ -288,7 +288,7 @@ console.log('--- Running Game Rules Tests ---');
   console.log('✓ Test 7 Passed: Final 2 player Ass/Donkey button ends game and crowns donkey');
 }
 
-// Test 8: Round 1 Ace of Spades lead rule
+// Test 8: Round 1 lead rule (player holding Ace of Spades can lead ANY card from hand)
 {
   const p1Ace = createCard('spades', 'A');
   const p1Other = createCard('hearts', 'K');
@@ -304,20 +304,16 @@ console.log('--- Running Game Rules Tests ---');
     currentTurn: 'p1',
   };
 
-  // Attempting to play non-Ace of Spades on Round 1 lead MUST fail
-  let errorThrown = false;
-  try {
-    applyCardPlay(players, gs, 'p1', p1Other);
-  } catch (_err: any) {
-    errorThrown = true;
-  }
-  assert(errorThrown, 'Round 1 lead must enforce Ace of Spades if held');
+  // Playing non-Ace of Spades (e.g. K♥) on Round 1 lead MUST succeed
+  const stepNonAce = applyCardPlay(players, gs, 'p1', p1Other);
+  assert(stepNonAce.gameState.centerPile.length === 1, 'Card played onto table');
+  assert(stepNonAce.gameState.leadSuit === 'hearts', 'Lead suit set to Hearts');
 
-  // Playing Ace of Spades succeeds
-  const step1 = applyCardPlay(players, gs, 'p1', p1Ace);
-  assert(step1.gameState.centerPile.length === 1, 'Ace of Spades played onto table');
-  assert(step1.gameState.leadSuit === 'spades', 'Lead suit is Spades');
-  console.log('✓ Test 8 Passed: Round 1 Ace of Spades lead rule strictly enforced');
+  // Alternatively, playing Ace of Spades is also allowed
+  const stepAce = applyCardPlay(players, gs, 'p1', p1Ace);
+  assert(stepAce.gameState.centerPile.length === 1, 'Ace of Spades played onto table');
+  assert(stepAce.gameState.leadSuit === 'spades', 'Lead suit is Spades');
+  console.log('✓ Test 8 Passed: Round 1 leader can lead any card (not forced to play Ace of Spades)');
 }
 
 // Test 9: User exact scenario: P1 leads Spade Ace, P2 plays Spade 10, P3 hits with Heart 5.
@@ -376,6 +372,50 @@ console.log('--- Running Game Rules Tests ---');
   assert(final.gameState.leadSuit === null, 'Lead suit reset to null so P1 can lead with any card');
   assert(final.gameState.roundNumber === 2, 'Round advanced to 2');
   console.log('✓ Test 9 Passed: User hit scenario where P1 collects all 3 cards into hand and leads next round');
+}
+
+// Test 10: Card transfer protection when a card is dropped (prevents card disappearance)
+{
+  const p1Spade4 = createCard('spades', '4');
+  const p1 = createPlayer('p1', 'Player 1', 0, [p1Spade4, createCard('hearts', '10')]);
+  const p2 = createPlayer('p2', 'Player 2', 1, [createCard('clubs', '7')]);
+  const p3 = createPlayer('p3', 'Player 3', 2, [createCard('diamonds', 'K')]);
+  const players = [p1, p2, p3];
+
+  const pendingRequest: CardRequest = {
+    id: 'req_123',
+    requesterId: 'p2',
+    requesterName: 'Player 2',
+    targetId: 'p3',
+    targetName: 'Player 3',
+    cardCount: 1,
+    status: 'pending',
+    createdAt: Date.now(),
+  };
+
+  const gs: GameState = {
+    ...emptyGameState(),
+    gameStarted: true,
+    roundNumber: 2,
+    currentLeader: 'p1',
+    currentTurn: 'p1',
+    cardRequest: pendingRequest,
+  };
+
+  // 1. P1 drops Spade 4 onto the table
+  const playStep = applyCardPlay(players, gs, 'p1', p1Spade4);
+  assert(playStep.gameState.centerPile.length === 1, 'Spade 4 is now in center pile');
+  assert(playStep.gameState.centerPile[0].card.id === 'spades-4', 'Center card is 4♠');
+  assert(playStep.gameState.cardRequest === null, 'Playing card must immediately cancel any pending card request');
+
+  // 2. Attempting applyCardTransfer while Spade 4 is on the table MUST be rejected
+  const transferAttempt = applyCardTransfer(playStep.players, playStep.gameState, 'p3', 'p2');
+  assert(transferAttempt.gameState.centerPile.length === 1, 'Spade 4 remains safely in center pile');
+  assert(transferAttempt.gameState.centerPile[0].card.id === 'spades-4', 'Spade 4 did not get wiped out');
+  assert(transferAttempt.players[1].cards.length === 1, 'P2 cards were not modified');
+  assert(transferAttempt.players[2].cards.length === 1, 'P3 cards were not modified');
+  assert(!transferAttempt.players[2].escaped, 'P3 did not escape inappropriately');
+  console.log('✓ Test 10 Passed: Card transfer is blocked during active tricks, preventing card loss');
 }
 
 console.log('--- All Game Rules Tests Passed Successfully! ---');

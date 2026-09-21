@@ -25,10 +25,10 @@ export default function CardDealModal({
   onDeclineRequest,
 }: Props) {
   const isTargetOfRequest = Boolean(
-    cardRequest && cardRequest.targetId === myId && cardRequest.status === 'pending'
+    canBuyCards && cardRequest && cardRequest.targetId === myId && cardRequest.status === 'pending'
   );
   const isRequesterWaiting = Boolean(
-    cardRequest && cardRequest.requesterId === myId && cardRequest.status === 'pending'
+    canBuyCards && cardRequest && cardRequest.requesterId === myId && cardRequest.status === 'pending'
   );
 
   return (

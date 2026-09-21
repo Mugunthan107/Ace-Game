@@ -154,6 +154,33 @@ export function triggerBotTurnIfNeeded(getState: () => GameStore) {
   }, 5000);
 }
 
+/**
+ * Protects against rare race conditions where a card was played locally but an incoming
+ * room update broadcast for the same round has not yet reflected it.
+ */
+function mergeIncomingRoom(currentRoom: RoomRow | null, incomingRoom: RoomRow): RoomRow {
+  if (
+    currentRoom &&
+    currentRoom.game_state.roundNumber === incomingRoom.game_state.roundNumber &&
+    currentRoom.game_state.centerPile.length > 0
+  ) {
+    const missingCards = currentRoom.game_state.centerPile.filter(
+      (localTc) => !incomingRoom.game_state.centerPile.some((inTc) => inTc.card.id === localTc.card.id)
+    );
+    if (missingCards.length > 0) {
+      return {
+        ...incomingRoom,
+        game_state: {
+          ...incomingRoom.game_state,
+          centerPile: [...incomingRoom.game_state.centerPile, ...missingCards],
+          leadSuit: incomingRoom.game_state.leadSuit || currentRoom.game_state.leadSuit,
+        },
+      };
+    }
+  }
+  return incomingRoom;
+}
+
 export const useGameStore = create<GameStore>((set, get) => ({
   view: 'landing',
   room: null,
@@ -181,11 +208,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const unsub = roomSync(
         room.id,
         (r) => {
-          const incomingPlayers = r.game_state?.players;
+          const finalRoom = mergeIncomingRoom(get().room, r);
+          const incomingPlayers = finalRoom.game_state?.players;
           if (incomingPlayers && incomingPlayers.length > 0) {
-            set({ room: r, players: incomingPlayers });
+            set({ room: finalRoom, players: incomingPlayers });
           } else {
-            set({ room: r });
+            set({ room: finalRoom });
           }
           triggerBotTurnIfNeeded(get);
         },
@@ -216,11 +244,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const unsub = roomSync(
         room.id,
         (r) => {
-          const incomingPlayers = r.game_state?.players;
+          const finalRoom = mergeIncomingRoom(get().room, r);
+          const incomingPlayers = finalRoom.game_state?.players;
           if (incomingPlayers && incomingPlayers.length > 0) {
-            set({ room: r, players: incomingPlayers });
+            set({ room: finalRoom, players: incomingPlayers });
           } else {
-            set({ room: r });
+            set({ room: finalRoom });
           }
           triggerBotTurnIfNeeded(get);
         },
@@ -260,11 +289,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const unsub = roomSync(
         room.id,
         (r) => {
-          const incomingPlayers = r.game_state?.players;
+          const finalRoom = mergeIncomingRoom(get().room, r);
+          const incomingPlayers = finalRoom.game_state?.players;
           if (incomingPlayers && incomingPlayers.length > 0) {
-            set({ room: r, players: incomingPlayers });
+            set({ room: finalRoom, players: incomingPlayers });
           } else {
-            set({ room: r });
+            set({ room: finalRoom });
           }
           triggerBotTurnIfNeeded(get);
         },
@@ -505,7 +535,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (!room || !myId || room.status !== 'playing' || room.game_state.gameEnded) return;
 
     // Buying cards is only allowed before a round starts or after a round finishes (center pile empty)
-    if (room.game_state.centerPile.length > 0) {
+    if (room.game_state.centerPile.length > 0 || room.game_state.leadSuit !== null) {
       set({ toast: 'Cards can only be bought before or after a round finishes.' });
       return;
     }
@@ -539,7 +569,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     await updateGameState(room.id, newGameState);
 
-    // If target is a bot, bot automatically accepts after 1.2s delay!
+    // If target is a bot, bot automatically accepts after 1.2s delay if round is still not active!
     if (isBot(target, myId)) {
       setTimeout(async () => {
         try {
@@ -547,7 +577,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
           if (
             fresh.room &&
             fresh.room.game_state.cardRequest &&
-            fresh.room.game_state.cardRequest.id === req.id
+            fresh.room.game_state.cardRequest.id === req.id &&
+            fresh.room.game_state.centerPile.length === 0 &&
+            fresh.room.game_state.leadSuit === null
           ) {
             await acceptCardRequest();
           }
@@ -563,11 +595,56 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (!room || !room.game_state.cardRequest) return;
     const req = room.game_state.cardRequest;
 
-    const result = applyCardTransfer(players, room.game_state, req.targetId, req.requesterId);
+    // 1. Local check: immediately abort if cards are already on table or a round is in progress
+    if (room.game_state.centerPile.length > 0 || room.game_state.leadSuit !== null) {
+      const clearedGameState = {
+        ...room.game_state,
+        cardRequest: null,
+      };
+      set({
+        room: { ...room, game_state: clearedGameState },
+        toast: 'Card deal cancelled: A round is already in progress.',
+      });
+      await updateGameState(room.id, clearedGameState).catch(() => {});
+      return;
+    }
+
+    // 2. Fresh database check: guarantee no concurrent card play landed right as user clicked accept
+    const freshRoom = await fetchRoom(room.id).catch(() => null);
+    if (
+      !freshRoom ||
+      !freshRoom.game_state ||
+      freshRoom.game_state.centerPile.length > 0 ||
+      freshRoom.game_state.leadSuit !== null ||
+      !freshRoom.game_state.cardRequest ||
+      freshRoom.game_state.cardRequest.id !== req.id
+    ) {
+      console.warn('[Game] Card transfer aborted: Table has cards or round in progress');
+      if (freshRoom) {
+        set({
+          room: freshRoom,
+          players: freshRoom.game_state?.players?.length ? freshRoom.game_state.players : get().players,
+          toast: 'Card deal cancelled: A card was played onto the table.',
+        });
+      }
+      return;
+    }
+
+    const freshPlayers = await fetchPlayers(room.id).catch(() => players);
+    const result = applyCardTransfer(freshPlayers, freshRoom.game_state, req.targetId, req.requesterId);
+
+    // If applyCardTransfer refused because table wasn't empty, abort cleanly
+    if (result.gameState.cardRequest === null && result.players === freshPlayers) {
+      set({
+        room: { ...freshRoom, game_state: result.gameState },
+        toast: 'Card deal cancelled.',
+      });
+      return;
+    }
 
     set({
       players: result.players,
-      room: { ...room, game_state: result.gameState },
+      room: { ...freshRoom, game_state: result.gameState },
       toast: `${req.targetName} gave all cards to ${req.requesterName} and escaped as a Winner! 🏆`,
     });
 

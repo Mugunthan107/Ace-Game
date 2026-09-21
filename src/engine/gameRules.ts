@@ -11,14 +11,9 @@ export function canPlayCard(
   hand: Card[],
   card: Card,
   leadSuit: Suit | null,
-  roundNumber?: number
+  _roundNumber?: number
 ): boolean {
-  if (roundNumber === 1 && !leadSuit) {
-    const hasAceSpades = hand.some((c) => c.suit === 'spades' && c.rank === 'A');
-    if (hasAceSpades) {
-      return card.suit === 'spades' && card.rank === 'A';
-    }
-  }
+  // If leading a trick (leadSuit is null), the leader can play ANY card in hand
   if (!leadSuit) return true;
   const hasLeadSuit = hand.some((c) => c.suit === leadSuit);
   if (!hasLeadSuit) return true;
@@ -229,7 +224,7 @@ export function applyCardPlay(
     throw new Error(`${actor.name} has already played a card in this round.`);
   }
 
-  // Legal play validation according to game rules (suit follow & Round 1 Ace of Spades)
+  // Legal play validation according to game rules (suit follow)
   if (!canPlayCard(actor.cards, card, gameState.leadSuit, gameState.roundNumber)) {
     throw new Error('Illegal card play according to game rules.');
   }
@@ -284,6 +279,7 @@ export function applyCardPlay(
       trickWinnerId: resolution.collectorId,
       lastEvent: event,
       lastEventAt: Date.now(),
+      cardRequest: null, // Playing a card immediately cancels any pending card deal
     };
 
     return {
@@ -304,6 +300,7 @@ export function applyCardPlay(
     hitOccurred: false,
     trickWinnerId: null,
     lastEvent: null,
+    cardRequest: null, // Playing a card immediately cancels any pending card deal
   };
 
   return {
@@ -486,8 +483,20 @@ export function applyCardTransfer(
   const target = players.find((p) => p.id === targetId);
   const requester = players.find((p) => p.id === requesterId);
 
-  if (!target || !requester || target.escaped || target.cards.length === 0) {
-    return { players, gameState, gameEnded: gameState.gameEnded };
+  // Card transfer is strictly forbidden when a round is in progress or cards are on the table
+  if (
+    !target ||
+    !requester ||
+    target.escaped ||
+    target.cards.length === 0 ||
+    gameState.centerPile.length > 0 ||
+    gameState.leadSuit !== null
+  ) {
+    return {
+      players,
+      gameState: { ...gameState, cardRequest: null },
+      gameEnded: gameState.gameEnded,
+    };
   }
 
   const transferredCards = [...target.cards];

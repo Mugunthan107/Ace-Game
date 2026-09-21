@@ -11,6 +11,7 @@ import CardHand from './CardHand';
 import EndGameModal from './EndGameModal';
 import EventBanner from './EventBanner';
 import CardDealModal from './CardDealModal';
+import HitCardFlyAnimation from './HitCardFlyAnimation';
 import VoiceControlBar from '../common/VoiceControlBar';
 
 /**
@@ -75,6 +76,21 @@ export default function GameBoard() {
 
   const gs = room?.game_state;
   const isRoundActive = (gs?.centerPile.length ?? 0) > 0;
+
+  // Identify the player who was hit and must collect the cards
+  const hitCollector = useMemo(() => {
+    if (!gs?.hitOccurred || !gs?.trickWinnerId) return null;
+    return players.find((p) => p.id === gs.trickWinnerId) ?? null;
+  }, [gs, players]);
+
+  // Compute table position of collector for sequential card flying animation
+  const collectorSeatPos = useMemo(() => {
+    if (!hitCollector || seated.length === 0) return null;
+    const collectorIdx = seated.findIndex((p) => p.id === hitCollector.id);
+    if (collectorIdx < 0) return null;
+    const relIdx = (collectorIdx - myIdx + seated.length) % seated.length;
+    return getAnticlockwiseSeatPosition(relIdx, seated.length);
+  }, [hitCollector, seated, myIdx]);
 
   // If a card is played while target menu is open, immediately close target menu
   useEffect(() => {
@@ -179,10 +195,22 @@ export default function GameBoard() {
           lastRoundPile={gs.lastRoundPile}
           hitPlayerId={gs.hitOccurred ? gs.centerPile.at(-1)?.playerId ?? null : null}
           collectorId={gs.trickWinnerId}
+          collectorName={hitCollector?.name ?? null}
           leadSuit={gs.leadSuit}
           roundNumber={gs.roundNumber}
           isMyTurn={isMyTurn}
         />
+
+        {/* Sequential Line-by-Line Card Flight to Hit Player */}
+        {gs.hitOccurred && gs.centerPile.length > 0 && collectorSeatPos && hitCollector && (
+          <HitCardFlyAnimation
+            key={`hit-fly-${gs.roundNumber}-${gs.centerPile.length}-${gs.trickWinnerId}`}
+            cards={gs.centerPile}
+            targetPos={collectorSeatPos}
+            collectorName={hitCollector.name}
+            isMe={hitCollector.id === myId}
+          />
+        )}
       </div>
 
       {/* Local User Action Bar + Turn Prompt (docked above hand) */}

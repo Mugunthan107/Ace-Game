@@ -15,7 +15,7 @@ const STEPS = [
   {
     icon: HiOutlineStar,
     title: 'First Round',
-    desc: 'Whoever is dealt the Ace of Spades leads the very first trick.',
+    desc: 'Whoever is dealt the Ace of Spades leads the very first trick with any card of their choice.',
   },
   {
     icon: HiOutlineArrowsRightLeft,

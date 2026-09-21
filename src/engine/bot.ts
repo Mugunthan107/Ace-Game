@@ -28,7 +28,7 @@ export function isBot(
  * Advanced Human-Level Memory Strategy for Donkey / Ass Game:
  *
  * 1. Opening:
- *    - In Round 1, if holding Ace of Spades, must lead with it.
+ *    - In Round 1, whoever holds Ace of Spades leads, and can lead any safe card.
  *
  * 2. Leading a trick:
  *    - Memory of dangerous vs safe suits.
@@ -49,19 +49,13 @@ export function isBot(
 export function chooseBotCard(
   hand: Card[],
   leadSuit: Suit | null,
-  roundNumber: number = 1,
+  _roundNumber: number = 1,
   centerPile: TrickCard[] = [],
   players: PlayerRow[] = [],
   _discardPile: Card[] = []
 ): Card {
   if (hand.length === 0) {
     throw new Error('Bot has no cards to play');
-  }
-
-  // 1. Mandatory Ace of Spades on Round 1 lead
-  if (!leadSuit && roundNumber === 1) {
-    const aceSpades = hand.find((c) => c.suit === 'spades' && c.rank === 'A');
-    if (aceSpades) return aceSpades;
   }
 
   // Filter legal cards

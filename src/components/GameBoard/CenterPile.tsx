@@ -9,6 +9,7 @@ interface Props {
   lastRoundPile?: TrickCard[];
   hitPlayerId: string | null;
   collectorId?: string | null;
+  collectorName?: string | null;
   leadSuit?: Suit | null;
   roundNumber?: number;
   isMyTurn?: boolean;
@@ -19,6 +20,7 @@ export default function CenterPile({
   lastRoundPile = [],
   hitPlayerId,
   collectorId,
+  collectorName,
   leadSuit,
   roundNumber = 1,
   isMyTurn,
@@ -35,12 +37,15 @@ export default function CenterPile({
 
   const hasCurrentCards = centerPile.length > 0;
   const hasPreviousCards = !hasCurrentCards && lastRoundPile.length > 0;
+  const isHitCollecting = Boolean(hasCurrentCards && hitPlayerId !== null && collectorId);
 
   return (
     <div className="absolute left-1/2 top-[46%] -translate-x-1/2 -translate-y-1/2 flex items-center justify-center pointer-events-none z-10 w-auto min-w-[155px] max-w-[205px] sm:max-w-[230px]">
       <div
         className={`transition-all duration-300 pointer-events-auto rounded-2xl sm:rounded-3xl bg-slate-950/90 border backdrop-blur-md shadow-2xl p-2 sm:p-2.5 flex flex-col items-center justify-center w-full min-h-[95px] sm:min-h-[110px] ${
-          isMyTurn
+          isHitCollecting
+            ? 'border-rose-500/70 ring-2 ring-rose-500/30 shadow-[0_0_30px_rgba(244,63,94,0.35)]'
+            : isMyTurn
             ? 'border-sky-400/60 ring-2 ring-sky-400/30 shadow-[0_0_25px_rgba(56,189,248,0.25)]'
             : 'border-white/10'
         }`}
@@ -51,7 +56,13 @@ export default function CenterPile({
             Round {roundNumber}
           </span>
 
-          {hasPreviousCards ? (
+          {isHitCollecting ? (
+            <span className="text-rose-400 font-extrabold text-[7px] sm:text-[9px] uppercase tracking-wide animate-pulse flex items-center gap-1">
+              <span>💥 HIT</span>
+              <span className="opacity-50">•</span>
+              <span className="truncate max-w-[80px]">{collectorName || 'Taking cards'}</span>
+            </span>
+          ) : hasPreviousCards ? (
             <span className="text-amber-300/90 font-bold text-[7px] sm:text-[9px] uppercase tracking-wide">
               Last Discards
             </span>
@@ -90,7 +101,20 @@ export default function CenterPile({
                   <motion.div
                     key={`${tc.playerId}-${tc.card.id}`}
                     initial={{ opacity: 0, y: -20, scale: 0.85 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    animate={
+                      isHitCollecting
+                        ? {
+                            opacity: [1, 1, 0],
+                            scale: [1, 1.06, 0.4],
+                            y: [0, -4, -16],
+                            transition: {
+                              duration: 0.22,
+                              delay: 0.75 + i * 0.24,
+                              times: [0, 0.3, 1],
+                            },
+                          }
+                        : { opacity: 1, y: 0, scale: 1 }
+                    }
                     exit={{ opacity: 0, scale: 0.5, y: 15 }}
                     transition={{ type: 'spring', stiffness: 350, damping: 25 }}
                     className="flex flex-col items-center relative my-0.5 shrink-0"
@@ -171,7 +195,7 @@ export default function CenterPile({
                 isMyTurn ? 'text-sky-300 font-bold animate-pulse' : 'text-white/40'
               }`}
             >
-              {isMyTurn ? '🂡 Drop Ace of Spades here to lead!' : 'Waiting for Ace of Spades lead...'}
+              {isMyTurn ? '🂡 Drop any card here to lead Round 1!' : 'Waiting for Round 1 leader to play...'}
             </span>
           </div>
         )}

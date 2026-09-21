@@ -45,6 +45,26 @@ const peerConnections = new Map<string, RTCPeerConnection>();
 const remoteAudioElements = new Map<string, HTMLAudioElement>();
 const iceCandidateQueues = new Map<string, RTCIceCandidateInit[]>();
 
+// ─── Polyfill for mediaDevices in older/embedded mobile browsers ───
+if (typeof navigator !== 'undefined') {
+  if (!navigator.mediaDevices) {
+    (navigator as any).mediaDevices = {};
+  }
+  if (!navigator.mediaDevices.getUserMedia) {
+    const legacyGUM =
+      (navigator as any).getUserMedia ||
+      (navigator as any).webkitGetUserMedia ||
+      (navigator as any).mozGetUserMedia ||
+      (navigator as any).msGetUserMedia;
+    if (legacyGUM) {
+      navigator.mediaDevices.getUserMedia = (constraints: MediaStreamConstraints) =>
+        new Promise((resolve, reject) => {
+          legacyGUM.call(navigator, constraints, resolve, reject);
+        });
+    }
+  }
+}
+
 // ─── ICE Configuration ───
 // STUN servers are free and help discover public IPs.
 // TURN servers are required when devices are on different networks (mobile data + WiFi).
@@ -65,9 +85,12 @@ let rtcConfig: RTCConfiguration = {
 // Fetch TURN credentials from Metered.ca
 async function fetchTurnCredentials(): Promise<void> {
   const appName = import.meta.env.VITE_METERED_APP_NAME || 'mugu';
-  const apiKey = import.meta.env.VITE_METERED_API_KEY;
-  const turnUsername = import.meta.env.VITE_METERED_USERNAME;
-  const turnCredential = import.meta.env.VITE_METERED_CREDENTIAL;
+  const apiKey =
+    import.meta.env.VITE_METERED_API_KEY || '1390dc87173a86602340f96467d310709e70';
+  const turnUsername =
+    import.meta.env.VITE_METERED_USERNAME || 'fab0561ec4dadadb8ec9cdd9';
+  const turnCredential =
+    import.meta.env.VITE_METERED_CREDENTIAL || 'JuJRL7g7gnXXyusU';
 
   // Helper for static fallback
   const applyStaticCredentials = () => {
@@ -865,21 +888,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
       if (!localStream || localStream.getAudioTracks().length === 0) {
         let stream: MediaStream;
 
-        // ── 4. Check for audio input devices ──
-        let hasAudioInput = true;
-        try {
-          const devices = await navigator.mediaDevices.enumerateDevices();
-          const audioInputs = devices.filter((d) => d.kind === 'audioinput');
-          hasAudioInput = audioInputs.length > 0;
-        } catch {
-          // Proceed anyway
-        }
-
-        if (!hasAudioInput) {
-          throw { name: 'NotFoundError', message: 'No microphone found.' };
-        }
-
-        // ── 5. Progressive constraint fallback ──
+        // ── 4. Progressive constraint fallback (triggers native permission prompt) ──
         const constraintSets: MediaStreamConstraints[] = [
           {
             audio: {
@@ -917,63 +926,72 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
         console.log('[Voice] Got microphone stream, tracks:', stream!.getAudioTracks().length);
         setupAudioAnalysis(stream!);
 
-        // ── 6. Add track to all peer connections and renegotiate ──
+        // ── 5. Add track to all peer connections and renegotiate ──
         const newTrack = stream!.getAudioTracks()[0];
         const myId = get().myId || '';
 
-        // For each peer, we need to either replace the track or create a new connection
-        const peerIds = Array.from(peerConnections.keys());
-        for (const peerId of peerIds) {
+        // Gather all peers: existing connections + known remote players
+        const allPeerIds = new Set<string>([
+          ...Array.from(peerConnections.keys()),
+          ...Object.keys(get().remotePlayers),
+        ]);
+
+        for (const peerId of allPeerIds) {
+          if (!peerId || peerId === myId) continue;
           const pc = peerConnections.get(peerId);
-          if (!pc) continue;
 
-          const connectionAlive =
-            pc.connectionState === 'connected' || pc.connectionState === 'connecting';
+          if (pc) {
+            const connectionAlive =
+              pc.connectionState === 'connected' || pc.connectionState === 'connecting';
 
-          if (connectionAlive) {
-            // Connection exists — try to replace track on existing sender
-            const senders = pc.getSenders();
-            const audioSender = senders.find(
-              (s) => s.track === null || (s.track && s.track.kind === 'audio'),
-            );
-            if (audioSender) {
-              await audioSender.replaceTrack(newTrack).catch((err) => {
-                console.warn('[Voice] replaceTrack failed for', peerId.substring(0, 8), err);
-              });
-              console.log('[Voice] Replaced track on connected peer', peerId.substring(0, 8));
+            if (connectionAlive) {
+              // Connection exists — try to replace track on existing sender
+              const senders = pc.getSenders();
+              const audioSender = senders.find(
+                (s) => s.track === null || (s.track && s.track.kind === 'audio'),
+              );
+              if (audioSender) {
+                await audioSender.replaceTrack(newTrack).catch((err) => {
+                  console.warn('[Voice] replaceTrack failed for', peerId.substring(0, 8), err);
+                });
+                console.log('[Voice] Replaced track on connected peer', peerId.substring(0, 8));
+              } else {
+                pc.addTrack(newTrack, stream!);
+                console.log('[Voice] Added new track to connected peer', peerId.substring(0, 8));
+              }
             } else {
-              pc.addTrack(newTrack, stream!);
-              console.log('[Voice] Added new track to connected peer', peerId.substring(0, 8));
+              // Connection not alive — destroy and recreate with the new track
+              console.log('[Voice] Connection not alive for', peerId.substring(0, 8), '— renegotiating');
+
+              pc.ontrack = null;
+              pc.onicecandidate = null;
+              pc.onconnectionstatechange = null;
+              pc.oniceconnectionstatechange = null;
+              pc.onicegatheringstatechange = null;
+              pc.close();
+              peerConnections.delete(peerId);
+              iceCandidateQueues.delete(peerId);
+
+              const audio = remoteAudioElements.get(peerId);
+              if (audio) {
+                audio.pause();
+                audio.srcObject = null;
+                remoteAudioElements.delete(peerId);
+              }
+
+              const isOfferer = shouldBeOfferer(myId, peerId);
+              if (isOfferer) {
+                // We recreate as offerer with our track
+                createPeerConnection(peerId, true);
+              } else {
+                // Ask the peer to renegotiate — they should send us a new offer
+                sendSignal(peerId, { type: 'renegotiate' });
+              }
             }
           } else {
-            // Connection not alive — destroy and recreate with the new track
-            console.log('[Voice] Connection not alive for', peerId.substring(0, 8), '— renegotiating');
-
-            pc.ontrack = null;
-            pc.onicecandidate = null;
-            pc.onconnectionstatechange = null;
-            pc.oniceconnectionstatechange = null;
-            pc.onicegatheringstatechange = null;
-            pc.close();
-            peerConnections.delete(peerId);
-            iceCandidateQueues.delete(peerId);
-
-            const audio = remoteAudioElements.get(peerId);
-            if (audio) {
-              audio.pause();
-              audio.srcObject = null;
-              remoteAudioElements.delete(peerId);
-            }
-
+            // Peer connection did not exist yet for this remote player
             const isOfferer = shouldBeOfferer(myId, peerId);
-            if (isOfferer) {
-              // We recreate as offerer with our track
-              createPeerConnection(peerId, true);
-            } else {
-              // Ask the peer to renegotiate — they should send us a new offer
-              sendSignal(peerId, { type: 'renegotiate' });
-              // Also create our side as answerer (the PC will be ready when offer arrives)
-            }
+            createPeerConnection(peerId, isOfferer);
           }
         }
       } else {

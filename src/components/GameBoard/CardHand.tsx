@@ -93,8 +93,6 @@ export default function CardHand({ hand, leadSuit, roundNumber, isMyTurn, onPlay
     if (!isMyTurn) return;
     if (legal.has(card.id)) {
       onPlay(card);
-    } else if (roundNumber === 1 && !leadSuit) {
-      setToast('Must lead with the Ace of Spades ♠');
     } else if (leadSuit) {
       setToast(`Must follow ${SUIT_THEME[leadSuit].name.toUpperCase()} ${SUIT_THEME[leadSuit].symbol}`);
     }
