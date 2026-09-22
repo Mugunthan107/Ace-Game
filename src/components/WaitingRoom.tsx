@@ -1,13 +1,10 @@
-import { useEffect, useState, memo } from 'react';
+import { useState, memo } from 'react';
 import { motion } from 'framer-motion';
 import { HiOutlineClipboard, HiOutlineCheck, HiOutlineShare, HiOutlineX, HiOutlineLogout } from 'react-icons/hi';
 import { GiCrown } from 'react-icons/gi';
-import { BsMicFill, BsMicMuteFill } from 'react-icons/bs';
 import { useGameStore } from '../store/gameStore';
-import { useVoiceStore } from '../store/voiceStore';
 import { PlayerRow } from '../types';
 import FloatingCards from './common/FloatingCards';
-import VoiceControlBar from './common/VoiceControlBar';
 
 interface SeatItemProps {
   p: PlayerRow;
@@ -17,14 +14,6 @@ interface SeatItemProps {
 }
 
 const WaitingSeatItem = memo(function WaitingSeatItem({ p, isHost, myId, onRemove }: SeatItemProps) {
-  const isPlayerMe = p.id === myId;
-  const isLocalMicOn = useVoiceStore((s) => s.isMicOn);
-  const isLocalSpeaking = useVoiceStore((s) => s.isSpeaking);
-  const remoteVoice = useVoiceStore((s) => (isPlayerMe ? null : s.remotePlayers[p.id]));
-
-  const pMicOn = isPlayerMe ? isLocalMicOn : (remoteVoice?.isMicOn ?? false);
-  const pSpeaking = isPlayerMe ? isLocalSpeaking : (remoteVoice?.isSpeaking ?? false);
-
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.85 }}
@@ -32,37 +21,12 @@ const WaitingSeatItem = memo(function WaitingSeatItem({ p, isHost, myId, onRemov
       className="flex flex-col items-center w-[64px] sm:w-[70px]"
     >
       <div className="relative">
-        {/* Speaking radial pulse */}
-        {pSpeaking && (
-          <span className="absolute -inset-1.5 rounded-full border-2 border-emerald-400 animate-ping opacity-75 pointer-events-none" />
-        )}
-
         <div
-          className={`w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center font-display font-extrabold text-white text-base shadow-lg transition-all ${
-            pSpeaking
-              ? 'ring-4 ring-emerald-400 border-2 border-emerald-300'
-              : 'border-2 border-white/20'
-          }`}
+          className="w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center font-display font-extrabold text-white text-base shadow-lg transition-all border-2 border-white/20"
           style={{ background: p.avatar_color }}
         >
           {p.name.slice(0, 1).toUpperCase()}
         </div>
-
-        {/* Mic status badge */}
-        {!p.is_bot && (
-          <span
-            className={`absolute -bottom-1 -left-1 w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full flex items-center justify-center text-[7px] sm:text-[8px] shadow-md border transition-colors ${
-              pSpeaking
-                ? 'bg-emerald-500 text-slate-950 border-white ring-2 ring-emerald-300 animate-pulse'
-                : pMicOn
-                ? 'bg-emerald-600 text-white border-white/80'
-                : 'bg-rose-600 text-white border-white/80'
-            }`}
-            title={pSpeaking ? `${p.name} speaking` : pMicOn ? 'Mic ON' : 'Mic OFF'}
-          >
-            {pMicOn ? <BsMicFill /> : <BsMicMuteFill />}
-          </span>
-        )}
 
         {/* Crown for Host */}
         {p.is_host && (
@@ -107,15 +71,7 @@ export default function WaitingRoom() {
   const [copied, setCopied] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
 
-  const initVoice = useVoiceStore((s) => s.initVoice);
-
   const me = players.find((p) => p.id === myId);
-
-  useEffect(() => {
-    if (room?.id && me?.id) {
-      initVoice(room.id, me.id, me.name);
-    }
-  }, [room?.id, me?.id, me?.name, initVoice]);
 
   if (!room) return null;
   const isHost = me?.is_host ?? false;
@@ -223,10 +179,7 @@ export default function WaitingRoom() {
             </div>
           </div>
 
-          {/* Voice Communication Bar */}
-          <div className="w-full mt-3 flex justify-center">
-            <VoiceControlBar compact />
-          </div>
+
 
           {/* Players Arena / Seats Roster */}
           <div className="w-full bg-slate-950/40 border border-white/5 rounded-2xl p-3 sm:p-4 mt-3">
@@ -293,7 +246,7 @@ export default function WaitingRoom() {
                       onChange={(e) => updateMaxPlayers(Number(e.target.value))}
                       className="appearance-none bg-slate-900 border border-cyan-500/40 rounded-xl px-2.5 py-1 sm:py-1.5 pr-6 text-xs font-bold text-cyan-200 outline-none cursor-pointer focus:ring-2 focus:ring-cyan-400"
                     >
-                      {Array.from({ length: 9 }, (_, i) => i + 2).map((n) => (
+                      {Array.from({ length: 10 }, (_, i) => i + 2).map((n) => (
                         <option
                           key={n}
                           value={n}
@@ -312,7 +265,7 @@ export default function WaitingRoom() {
                   <button
                     type="button"
                     onClick={() => updateMaxPlayers(room.max_players + 1)}
-                    disabled={room.max_players >= 10}
+                    disabled={room.max_players >= 11}
                     className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 text-white font-black flex items-center justify-center text-sm sm:text-base disabled:opacity-25 disabled:pointer-events-none transition-all border border-white/10"
                     title="Increase capacity"
                   >

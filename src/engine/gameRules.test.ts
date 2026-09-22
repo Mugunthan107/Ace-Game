@@ -1,4 +1,4 @@
-import { applyCardPlay, finalizeTrickResolution, declarePlayerAss, applyCardTransfer } from './gameRules';
+import { applyCardPlay, finalizeTrickResolution, declarePlayerAss, applyCardTransfer, startGameDeal, isActivePlayer } from './gameRules';
 import { Card, emptyGameState, GameState, PlayerRow, CardRequest } from '../types';
 
 function createCard(suit: 'spades' | 'hearts' | 'clubs' | 'diamonds', rank: any): Card {
@@ -416,6 +416,153 @@ console.log('--- Running Game Rules Tests ---');
   assert(transferAttempt.players[2].cards.length === 1, 'P3 cards were not modified');
   assert(!transferAttempt.players[2].escaped, 'P3 did not escape inappropriately');
   console.log('✓ Test 10 Passed: Card transfer is blocked during active tricks, preventing card loss');
+}
+
+// Test 11: P1 buys full cards from P2 (P2 now has 0 cards and escapes). In a 3-player game,
+// when P1 drops a card, turn must skip P2 and go directly to P3.
+{
+  const p1Cards: Card[] = [
+    createCard('spades', 'A'),
+    createCard('hearts', '5'),
+  ];
+  const p2Cards: Card[] = [
+    createCard('spades', 'K'),
+    createCard('clubs', '10'),
+  ];
+  const p3Cards: Card[] = [
+    createCard('spades', '9'),
+    createCard('diamonds', 'K'),
+  ];
+
+  const p1 = createPlayer('p1', 'Player 1', 0, p1Cards);
+  const p2 = createPlayer('p2', 'Player 2', 1, p2Cards);
+  const p3 = createPlayer('p3', 'Player 3', 2, p3Cards);
+  const players = [p1, p2, p3];
+
+  const initialGs: GameState = {
+    ...emptyGameState(),
+    gameStarted: true,
+    roundNumber: 1,
+    currentLeader: 'p1',
+    currentTurn: 'p1',
+    players,
+  };
+
+  // P1 buys all cards from P2
+  const transfer = applyCardTransfer(players, initialGs, 'p2', 'p1');
+  const p2AfterTransfer = transfer.players.find(p => p.id === 'p2')!;
+  const p1AfterTransfer = transfer.players.find(p => p.id === 'p1')!;
+
+  assert(p2AfterTransfer.cards.length === 0, 'P2 must have 0 cards after transfer');
+  assert(p2AfterTransfer.escaped === true, 'P2 must be marked as escaped');
+  assert(p1AfterTransfer.cards.length === 4, 'P1 must have 4 cards (2 original + 2 from P2)');
+  assert(transfer.gameState.currentTurn === 'p1', 'Current turn should remain P1');
+
+  // P1 drops a card for normal game
+  const cardToPlay = p1AfterTransfer.cards[0];
+  const playStep = applyCardPlay(transfer.players, transfer.gameState, 'p1', cardToPlay);
+
+  assert(playStep.gameState.centerPile.length === 1, 'Card must be placed in center pile');
+  assert(playStep.gameState.centerPile[0].card.id === cardToPlay.id, 'Center card matches played card');
+  assert(playStep.gameState.currentTurn === 'p3', `Next turn MUST be P3, but got ${playStep.gameState.currentTurn}`);
+  console.log('✓ Test 11 Passed: When P1 buys full cards from P2 and plays, turn skips P2 (0 cards) and goes to P3');
+}
+
+// Test 12: Comprehensive verification for all player counts from 3 to 11 players.
+// Verifies:
+// 1. Correct card deal across N players.
+// 2. Card transfer of full hand from P2 to P1 leaves P2 with 0 cards and escaped.
+// 3. Turn progression cleanly skips P2 and only advances through active players with cards.
+// 4. Trick completes with exactly N-1 cards (clean) or earlier (hit).
+// 5. Trick resolution transitions cleanly to round 2 with an active leader (never 0-card/escaped).
+{
+  for (let n = 3; n <= 11; n++) {
+    const initialPlayers: PlayerRow[] = Array.from({ length: n }, (_, i) =>
+      createPlayer(`p${i + 1}`, `Player ${i + 1}`, i, [])
+    );
+
+    const dealt = startGameDeal(initialPlayers);
+    let players = dealt.players;
+    let gs = dealt.gameState;
+
+    assert(players.length === n, `Should have ${n} players`);
+    assert(gs.players?.length === n, `GameState should have ${n} players`);
+
+    // P1 buys all cards from P2
+    const targetId = 'p2';
+    const requesterId = 'p1';
+    const p2OriginalCount = players.find((p) => p.id === targetId)!.cards.length;
+    const p1OriginalCount = players.find((p) => p.id === requesterId)!.cards.length;
+
+    const transfer = applyCardTransfer(players, gs, targetId, requesterId);
+    players = transfer.players;
+    gs = transfer.gameState;
+
+    const p2After = players.find((p) => p.id === targetId)!;
+    const p1After = players.find((p) => p.id === requesterId)!;
+    assert(p2After.cards.length === 0, `${targetId} must have 0 cards after transfer in ${n}-player game`);
+    assert(p2After.escaped === true, `${targetId} must be marked escaped in ${n}-player game`);
+    assert(
+      p1After.cards.length === p1OriginalCount + p2OriginalCount,
+      `${requesterId} must hold all cards in ${n}-player game`
+    );
+
+    // Ensure currentTurn is an active player with cards
+    const turnPlayer = players.find((p) => p.id === gs.currentTurn);
+    assert(
+      turnPlayer !== undefined && !turnPlayer.escaped && turnPlayer.cards.length > 0,
+      `Current turn must be active in ${n}-player game, got ${gs.currentTurn}`
+    );
+
+    // Current turn player plays
+    const currentLeaderId = gs.currentTurn!;
+    const leaderPlayer = players.find((p) => p.id === currentLeaderId)!;
+    const leadCard = leaderPlayer.cards[0];
+
+    const playStep1 = applyCardPlay(players, gs, currentLeaderId, leadCard);
+    players = playStep1.players;
+    gs = playStep1.gameState;
+
+    assert(gs.centerPile.length === 1, `Center pile must have 1 card in ${n}-player game`);
+    assert(gs.currentTurn !== targetId, `Next turn must NEVER be ${targetId} (0 cards) in ${n}-player game`);
+
+    // Play remaining turns until trick completes
+    let loopCount = 0;
+    while (!gs.hitOccurred && gs.currentTurn && loopCount < n + 5) {
+      loopCount++;
+      const currentActorId = gs.currentTurn;
+      assert(currentActorId !== targetId, `Turn must never be ${targetId} in ${n}-player game`);
+      const actor = players.find((p) => p.id === currentActorId)!;
+      assert(isActivePlayer(actor), `Actor ${actor.id} must be active with cards`);
+
+      const leadSuit = gs.leadSuit!;
+      const legalCard = actor.cards.find((c) => c.suit === leadSuit) ?? actor.cards[0];
+
+      const playResult = applyCardPlay(players, gs, currentActorId, legalCard);
+      players = playResult.players;
+      gs = playResult.gameState;
+
+      if (playResult.isPendingResolution) {
+        assert(playResult.resolution !== null, `Resolution must exist in ${n}-player game`);
+        if (!playResult.resolution!.wasHit) {
+          assert(
+            gs.centerPile.length === n - 1,
+            `Clean trick in ${n}-player game with 1 escaped must have ${n - 1} cards, got ${gs.centerPile.length}`
+          );
+        }
+
+        // Finalize trick into round 2
+        const finalStep = finalizeTrickResolution(players, gs, playResult.resolution!);
+        players = finalStep.players;
+        gs = finalStep.gameState;
+        assert(gs.roundNumber === 2, `Round number must advance to 2 in ${n}-player game`);
+        assert(gs.currentTurn !== targetId, `Round 2 turn must not be ${targetId}`);
+        assert(gs.currentLeader !== targetId, `Round 2 leader must not be ${targetId}`);
+        break;
+      }
+    }
+  }
+  console.log('✓ Test 12 Passed: All player counts from 3 to 11 successfully tested (buy card, skip 0-card player, complete trick, and lead round 2)');
 }
 
 console.log('--- All Game Rules Tests Passed Successfully! ---');

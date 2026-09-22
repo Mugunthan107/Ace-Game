@@ -193,8 +193,11 @@ export function roomSync(
         const row = (payload.new || payload.old) as any;
         if (!row || row.room_id === roomId) {
           try {
-            const players = await fetchPlayers(roomId);
-            onPlayersChange(players);
+            const room = await fetchRoom(roomId);
+            if (room && room.status === 'waiting') {
+              const players = await fetchPlayers(roomId);
+              onPlayersChange(players);
+            }
           } catch {
             // best-effort fetch
           }

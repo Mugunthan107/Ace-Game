@@ -1,16 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "headers": [
-    {
-      "source": "/(.*)",
-      "headers": [
-        {
-          "key": "Permissions-Policy",
-          "value": "microphone=(self)"
-        }
-      ]
-    }
-  ],
   "rewrites": [
     {
       "source": "/(.*)",
@@ -18,4 +7,3 @@
     }
   ]
 }
-

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { Card, PlayerRow, RoomRow, CardRequest, GameState } from '../types';
-import { applyCardPlay, finalizeTrickResolution, startGameDeal, applyCardTransfer, declarePlayerAss } from '../engine/gameRules';
+import { applyCardPlay, finalizeTrickResolution, startGameDeal, applyCardTransfer, declarePlayerAss, findNextActivePlayer } from '../engine/gameRules';
 import { chooseBotCard, isBot } from '../engine/bot';
 import {
   addBotPlayers,
@@ -16,7 +16,6 @@ import {
   updatePlayer,
   updateRoom,
 } from '../engine/sync';
-import { useVoiceStore } from './voiceStore';
 
 const SESSION_KEY = 'ass_session_v1';
 
@@ -117,6 +116,21 @@ export function triggerBotTurnIfNeeded(getState: () => GameStore) {
   if (!isHost) return;
 
   const currentTurnPlayer = players.find((p) => p.id === gs.currentTurn);
+
+  // Self-healing: if current turn is assigned to an escaped player or someone with 0 cards, advance immediately!
+  if (currentTurnPlayer && (currentTurnPlayer.escaped || currentTurnPlayer.cards.length === 0)) {
+    const nextActive = findNextActivePlayer(players, currentTurnPlayer.id);
+    if (nextActive) {
+      const fixedGameState = {
+        ...gs,
+        currentTurn: nextActive.id,
+      };
+      useGameStore.setState({ room: { ...room, game_state: fixedGameState } });
+      updateGameState(room.id, fixedGameState).catch(() => {});
+      return;
+    }
+  }
+
   if (!currentTurnPlayer || !isBot(currentTurnPlayer, myId)) {
     if (botTurnTimeout) {
       clearTimeout(botTurnTimeout);
@@ -245,7 +259,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
           triggerBotTurnIfNeeded(get);
         },
         () => {
-          useVoiceStore.getState().leaveVoice();
           set({ room: null, players: [], view: 'landing' });
           clearSession();
         },
@@ -287,7 +300,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
           triggerBotTurnIfNeeded(get);
         },
         () => {
-          useVoiceStore.getState().leaveVoice();
           set({ room: null, players: [], view: 'landing' });
           clearSession();
         },
@@ -338,7 +350,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
           triggerBotTurnIfNeeded(get);
         },
         () => {
-          useVoiceStore.getState().leaveVoice();
           set({ room: null, players: [], view: 'landing' });
           clearSession();
         },
@@ -359,7 +370,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   leaveRoom: async () => {
     const { room, myId, unsubscribe, players } = get();
-    useVoiceStore.getState().leaveVoice();
     if (unsubscribe) unsubscribe();
     clearSession();
     set({ room: null, players: [], myId: null, view: 'landing', unsubscribe: null });
@@ -391,7 +401,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   cancelRoom: async () => {
     const { room, unsubscribe } = get();
-    useVoiceStore.getState().leaveVoice();
     if (!room) return;
     if (unsubscribe) unsubscribe();
     clearSession();
@@ -458,7 +467,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (!isHost) return;
 
     const minLimit = Math.max(2, players.length);
-    const clamped = Math.min(10, Math.max(minLimit, maxPlayers));
+    const clamped = Math.min(11, Math.max(minLimit, maxPlayers));
     try {
       await updateRoom(room.id, { max_players: clamped });
       set({ room: { ...room, max_players: clamped } });
@@ -469,15 +478,21 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   executePlay: async (actorId: string, card: Card) => {
-    const { room, players } = get();
+    const { room } = get();
     if (!room || room.status !== 'playing' || room.game_state.gameEnded) return;
 
     // Safety checks: player must currently hold the turn and must not have already played this round
     if (room.game_state.currentTurn !== actorId) return;
     if (room.game_state.centerPile.some((tc) => tc.playerId === actorId)) return;
 
+    // Use the canonical synchronized players from game_state if present
+    const currentPlayers =
+      room.game_state.players && room.game_state.players.length > 0
+        ? room.game_state.players
+        : get().players;
+
     // 1. Play card onto table (step 1)
-    const step1 = applyCardPlay(players, room.game_state, actorId, card);
+    const step1 = applyCardPlay(currentPlayers, room.game_state, actorId, card);
 
     // Optimistic instant local update (0ms response, no UI freeze)
     set({
@@ -650,7 +665,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   acceptCardRequest: async () => {
-    const { room, players } = get();
+    const { room } = get();
     if (!room || !room.game_state.cardRequest) return;
     const req = room.game_state.cardRequest;
 
@@ -689,11 +704,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return;
     }
 
-    const freshPlayers = await fetchPlayers(room.id).catch(() => players);
-    const result = applyCardTransfer(freshPlayers, freshRoom.game_state, req.targetId, req.requesterId);
+    const currentPlayers =
+      freshRoom.game_state?.players && freshRoom.game_state.players.length > 0
+        ? freshRoom.game_state.players
+        : (room.game_state?.players?.length ? room.game_state.players : get().players);
+    const result = applyCardTransfer(currentPlayers, freshRoom.game_state, req.targetId, req.requesterId);
 
     // If applyCardTransfer refused because table wasn't empty, abort cleanly
-    if (result.gameState.cardRequest === null && result.players === freshPlayers) {
+    if (result.gameState.cardRequest === null && result.players === currentPlayers) {
       set({
         room: { ...freshRoom, game_state: result.gameState },
         toast: 'Card deal cancelled.',
@@ -711,18 +729,25 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const targetPlayer = result.players.find((p) => p.id === req.targetId);
     const reqPlayer = result.players.find((p) => p.id === req.requesterId);
 
+    const syncPromises: Promise<any>[] = [
+      updateGameState(room.id, result.gameState),
+    ];
     if (targetPlayer) {
-      updatePlayer(targetPlayer.id, {
-        cards: [],
-        escaped: true,
-        escape_rank: targetPlayer.escape_rank,
-      }).catch(() => {});
+      syncPromises.push(
+        updatePlayer(targetPlayer.id, {
+          cards: [],
+          escaped: true,
+          escape_rank: targetPlayer.escape_rank,
+        }).catch(() => {})
+      );
     }
     if (reqPlayer) {
-      updatePlayer(reqPlayer.id, { cards: reqPlayer.cards }).catch(() => {});
+      syncPromises.push(
+        updatePlayer(reqPlayer.id, { cards: reqPlayer.cards }).catch(() => {})
+      );
     }
 
-    await updateGameState(room.id, result.gameState);
+    await Promise.all(syncPromises);
 
     if (result.gameEnded) {
       await updateRoom(room.id, { status: 'ended' });

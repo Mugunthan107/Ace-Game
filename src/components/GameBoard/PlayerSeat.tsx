@@ -2,11 +2,8 @@ import { memo } from 'react';
 import { motion } from 'framer-motion';
 import { GiCrown, GiDonkey } from 'react-icons/gi';
 import { HiOutlineTrophy } from 'react-icons/hi2';
-import { BsMicFill, BsMicMuteFill } from 'react-icons/bs';
-import { HiSpeakerXMark } from 'react-icons/hi2';
 import { PlayerRow } from '../../types';
 import { isBot } from '../../engine/bot';
-import { useVoiceStore } from '../../store/voiceStore';
 
 interface Props {
   player: PlayerRow;
@@ -27,17 +24,9 @@ function PlayerSeat({
   style,
   onClick,
 }: Props) {
+  const isVeryCrowded = totalPlayers >= 10;
   const isCrowded = totalPlayers >= 7;
   const isHuman = !isBot(player);
-
-  const isLocalMicOn = useVoiceStore((s) => s.isMicOn);
-  const isLocalSpeaking = useVoiceStore((s) => s.isSpeaking);
-  const isLocalSpeakerOn = useVoiceStore((s) => s.isSpeakerOn);
-  const remotePlayerState = useVoiceStore((s) => s.remotePlayers[player.id]);
-
-  const isPlayerMicOn = isMe ? isLocalMicOn : (remotePlayerState?.isMicOn ?? false);
-  const isPlayerSpeaking = isMe ? isLocalSpeaking : (remotePlayerState?.isSpeaking ?? false);
-  const isPlayerSpeakerOn = isMe ? isLocalSpeakerOn : (remotePlayerState?.isSpeakerOn ?? true);
 
   return (
     <div
@@ -50,13 +39,6 @@ function PlayerSeat({
       }`}
     >
       <div className="relative flex flex-col items-center">
-        {/* Speaking radiant voice wave */}
-        {isPlayerSpeaking && (
-          <>
-            <span className="absolute -inset-2.5 sm:-inset-3.5 rounded-full border-2 border-emerald-400 animate-ping opacity-60 pointer-events-none" />
-            <span className="absolute -inset-2 sm:-inset-3 rounded-full bg-emerald-400/40 blur-md animate-pulse pointer-events-none" />
-          </>
-        )}
 
         {/* Radiant Turn Glowing Auras & Expanding Radar Waves */}
         {isTurn && (
@@ -85,11 +67,9 @@ function PlayerSeat({
 
         <div
           className={`relative rounded-full flex items-center justify-center font-display font-bold text-white transition-all
-            ${isCrowded ? 'w-8 h-8 sm:w-11 sm:h-11 text-xs sm:text-sm' : 'w-9 h-9 sm:w-12 sm:h-12 text-xs sm:text-base'}
+            ${isVeryCrowded ? 'w-7 h-7 sm:w-9 sm:h-9 text-[11px] sm:text-xs' : isCrowded ? 'w-8 h-8 sm:w-11 sm:h-11 text-xs sm:text-sm' : 'w-9 h-9 sm:w-12 sm:h-12 text-xs sm:text-base'}
             ${
-              isPlayerSpeaking
-                ? 'border-2 border-emerald-300 ring-4 ring-emerald-400 shadow-[0_0_24px_rgba(52,211,153,0.9)]'
-                : isTurn
+              isTurn
                 ? 'border-2 border-white ring-4 ring-sky-300 shadow-[0_0_25px_rgba(56,189,248,1),0_0_50px_rgba(14,165,233,0.7)] animate-turn-glow'
                 : isMe
                 ? 'border-2 border-sky-400/80 ring-2 ring-sky-400/40 shadow-[0_0_10px_rgba(56,189,248,0.4)]'
@@ -108,38 +88,6 @@ function PlayerSeat({
               title="Bot"
             >
               🤖
-            </span>
-          )}
-
-          {/* Voice status badge for human players */}
-          {isHuman && (
-            <span
-              className={`absolute -bottom-1 -left-1 w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full flex items-center justify-center text-[7px] sm:text-[8px] shadow border transition-colors ${
-                isPlayerSpeaking
-                  ? 'bg-emerald-500 text-slate-950 border-white ring-2 ring-emerald-300 animate-pulse'
-                  : isPlayerMicOn
-                  ? 'bg-emerald-600 text-white border-white/70'
-                  : 'bg-rose-600 text-white border-white/70'
-              }`}
-              title={
-                isPlayerSpeaking
-                  ? `${player.name} is speaking`
-                  : isPlayerMicOn
-                  ? `${player.name}: Mic is on`
-                  : `${player.name}: Mic is muted`
-              }
-            >
-              {isPlayerMicOn ? <BsMicFill /> : <BsMicMuteFill />}
-            </span>
-          )}
-
-          {/* Deafened indicator badge */}
-          {isHuman && !isPlayerSpeakerOn && (
-            <span
-              className="absolute -bottom-1 -right-1 w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full bg-rose-600 text-white flex items-center justify-center text-[7px] sm:text-[8px] shadow border border-white/70"
-              title={`${player.name} has sound muted`}
-            >
-              <HiSpeakerXMark />
             </span>
           )}
 
@@ -169,7 +117,7 @@ function PlayerSeat({
       {/* Unified Compact Name & Card Count Pill */}
       <div
         className={`flex items-center gap-1 glass rounded-full shadow-sm transition-all border ${
-          isCrowded ? 'px-1.5 py-0.5 max-w-[68px] sm:max-w-[88px]' : 'px-2 py-0.5 max-w-[78px] sm:max-w-[96px]'
+          isVeryCrowded ? 'px-1 py-0.5 max-w-[56px] sm:max-w-[76px]' : isCrowded ? 'px-1.5 py-0.5 max-w-[68px] sm:max-w-[88px]' : 'px-2 py-0.5 max-w-[78px] sm:max-w-[96px]'
         } ${
           isTurn
             ? 'border-sky-300 bg-sky-950/95 ring-2 ring-sky-400 shadow-[0_0_14px_rgba(56,189,248,0.7)]'
@@ -180,7 +128,7 @@ function PlayerSeat({
       >
         <span
           className={`font-semibold truncate ${
-            isCrowded ? 'text-[8px] sm:text-[11px]' : 'text-[9px] sm:text-xs'
+            isVeryCrowded ? 'text-[7px] sm:text-[9px]' : isCrowded ? 'text-[8px] sm:text-[11px]' : 'text-[9px] sm:text-xs'
           } ${
             isTurn ? 'text-sky-200 font-extrabold' : isMe ? 'text-sky-300' : 'text-white'
           }`}
@@ -188,14 +136,14 @@ function PlayerSeat({
           {player.name}
         </span>
         {isMe && (
-          <span className="text-[7px] sm:text-[8px] bg-sky-400 text-slate-950 font-black px-1 rounded uppercase shrink-0">
+          <span className="text-[6.5px] sm:text-[7.5px] bg-sky-400 text-slate-950 font-black px-1 rounded uppercase shrink-0">
             YOU
           </span>
         )}
         {!player.escaped && (
           <span
-            className={`rounded-full px-1.5 py-[0.5px] font-extrabold shrink-0 ${
-              isCrowded ? 'text-[7px] sm:text-[8px]' : 'text-[8px] sm:text-[9px]'
+            className={`rounded-full font-extrabold shrink-0 ${
+              isVeryCrowded ? 'text-[6.5px] sm:text-[7.5px] px-1 py-[0.5px]' : isCrowded ? 'text-[7px] sm:text-[8px] px-1.5 py-[0.5px]' : 'text-[8px] sm:text-[9px] px-1.5 py-[0.5px]'
             } ${
               isTurn ? 'bg-sky-400 text-slate-950' : 'bg-white/20 text-white'
             }`}

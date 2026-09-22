@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { HiOutlineXMark } from 'react-icons/hi2';
 import { useGameStore, triggerBotTurnIfNeeded } from '../../store/gameStore';
-import { useVoiceStore } from '../../store/voiceStore';
 import { PlayerRow } from '../../types';
 import { isBot } from '../../engine/bot';
 import PlayerSeat from './PlayerSeat';
@@ -12,7 +11,6 @@ import EndGameModal from './EndGameModal';
 import EventBanner from './EventBanner';
 import CardDealModal from './CardDealModal';
 import HitCardFlyAnimation from './HitCardFlyAnimation';
-import VoiceControlBar from '../common/VoiceControlBar';
 
 /**
  * Positions players along an anticlockwise circular/oval table around the center pile.
@@ -53,20 +51,11 @@ export default function GameBoard() {
   const declareAss = useGameStore((s) => s.declareAss);
   const setToast = useGameStore((s) => s.setToast);
 
-  const initVoice = useVoiceStore((s) => s.initVoice);
-
   const [selectedTarget, setSelectedTarget] = useState<PlayerRow | null>(null);
   const [showAssConfirm, setShowAssConfirm] = useState(false);
 
   const seated = useMemo(() => [...players].sort((a, b) => a.seat_order - b.seat_order), [players]);
   const me = players.find((p) => p.id === myId);
-
-  // Initialize and persist voice chat connection
-  useEffect(() => {
-    if (room?.id && me?.id) {
-      initVoice(room.id, me.id, me.name);
-    }
-  }, [room?.id, me?.id, me?.name, initVoice]);
 
   // Local user's seat index in official seat order
   const myIdx = useMemo(() => {
@@ -102,7 +91,7 @@ export default function GameBoard() {
   if (!room || !me || !gs) return null;
 
   const hasPlayedThisRound = gs.centerPile.some((tc) => tc.playerId === myId);
-  const isMyTurn = gs.currentTurn === myId && !hasPlayedThisRound && !gs.gameEnded;
+  const isMyTurn = gs.currentTurn === myId && !hasPlayedThisRound && !gs.gameEnded && !me.escaped && me.cards.length > 0;
   const activeRemaining = players.filter((p) => !p.escaped && p.cards.length > 0);
   const donkeyCandidateId = activeRemaining.length === 1 ? activeRemaining[0].id : null;
   const isFinalTwo = activeRemaining.length === 2 && !me.escaped && !gs.gameEnded && activeRemaining.some((p) => p.id === myId);
@@ -129,8 +118,6 @@ export default function GameBoard() {
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2">
-          <VoiceControlBar compact />
-
           {/* Top right: Donkey button (shown only during final 2-player showdown) */}
           {isFinalTwo && (
             <button
@@ -172,7 +159,7 @@ export default function GameBoard() {
             <PlayerSeat
               key={p.id}
               player={p}
-              isTurn={gs.currentTurn === p.id}
+              isTurn={gs.currentTurn === p.id && !p.escaped && p.cards.length > 0}
               isMe={isPlayerMe}
               isDonkeyCandidate={donkeyCandidateId === p.id}
               totalPlayers={seated.length}
@@ -233,7 +220,7 @@ export default function GameBoard() {
                 <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping" />
                 <span>YOUR TURN</span>
               </motion.div>
-            ) : (
+            ) : players.find((p) => p.id === gs.currentTurn && !p.escaped && p.cards.length > 0) ? (
               <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-900/80 border border-white/10 text-white/80 text-[10px] sm:text-xs font-semibold">
                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
                 <span className="truncate max-w-[130px]">
@@ -241,7 +228,7 @@ export default function GameBoard() {
                   {isBot(players.find((p) => p.id === gs.currentTurn), myId) ? ' thinking...' : ' playing...'}
                 </span>
               </div>
-            )}
+            ) : null}
           </div>
         )}
       </div>

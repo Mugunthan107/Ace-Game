@@ -216,7 +216,17 @@ export function applyCardPlay(
   actorId: string,
   card: Card
 ): ApplyCardPlayResult {
-  const actor = players.find((p) => p.id === actorId);
+  // Use gameState.players if populated to ensure canonical sync across card transfers
+  const canonicalPlayers =
+    gameState.players && gameState.players.length > 0 ? gameState.players : players;
+
+  let actor = canonicalPlayers.find((p) => p.id === actorId);
+  if (!actor || !actor.cards.some((c) => c.id === card.id)) {
+    const fallbackActor = players.find((p) => p.id === actorId);
+    if (fallbackActor) {
+      actor = fallbackActor;
+    }
+  }
   if (!actor) throw new Error('Player not found');
 
   // Rule: each player can put only ONE card for each round
@@ -230,7 +240,7 @@ export function applyCardPlay(
   }
 
   const newHand = removeCards(actor.cards, [card.id]);
-  const updated = players.map((p) => (p.id === actorId ? { ...p, cards: newHand } : p));
+  const updated = canonicalPlayers.map((p) => (p.id === actorId ? { ...p, cards: newHand } : p));
 
   const wasLeadingPlay = gameState.leadSuit === null;
   const leadSuit: Suit = wasLeadingPlay ? card.suit : (gameState.leadSuit as Suit);
@@ -238,16 +248,20 @@ export function applyCardPlay(
   const centerPile = [...gameState.centerPile, trickCard];
   const isHitPlay = !wasLeadingPlay && card.suit !== gameState.leadSuit;
 
-  // Total unescaped players expected to play in this trick
-  const unescapedPlayers = updated.filter((p) => !p.escaped);
-  const trickParticipantsCount = unescapedPlayers.length;
+  const playedIds = new Set(centerPile.map((tc) => tc.playerId));
+
+  // Total active participants expected to play in this trick:
+  // Must either hold cards or have already played a card this trick (and was not escaped beforehand)
+  const trickParticipantsCount = updated.filter(
+    (p) => (!p.escaped && p.cards.length > 0) || playedIds.has(p.id)
+  ).length;
 
   // Find the next active player who hasn't put a card in this round yet
   const nextPlayer = isHitPlay ? null : findNextTrickPlayer(updated, actor.id, centerPile);
 
   // Trick finishes if:
   // - A hit occurred (someone broke the lead suit)
-  // - OR all unescaped players have placed their 1 card (centerPile.length >= trickParticipantsCount or nextPlayer === null)
+  // - OR all trick participants have placed their 1 card (centerPile.length >= trickParticipantsCount or nextPlayer === null)
   const isTrickComplete = isHitPlay || !nextPlayer || centerPile.length >= trickParticipantsCount;
 
   if (isTrickComplete) {
@@ -480,8 +494,11 @@ export function applyCardTransfer(
   targetId: string,
   requesterId: string
 ): { players: PlayerRow[]; gameState: GameState; gameEnded: boolean } {
-  const target = players.find((p) => p.id === targetId);
-  const requester = players.find((p) => p.id === requesterId);
+  const basePlayers =
+    gameState.players && gameState.players.length > 0 ? gameState.players : players;
+
+  const target = basePlayers.find((p) => p.id === targetId) ?? players.find((p) => p.id === targetId);
+  const requester = basePlayers.find((p) => p.id === requesterId) ?? players.find((p) => p.id === requesterId);
 
   // Card transfer is strictly forbidden when a round is in progress or cards are on the table
   if (
@@ -493,7 +510,7 @@ export function applyCardTransfer(
     gameState.leadSuit !== null
   ) {
     return {
-      players,
+      players: basePlayers,
       gameState: { ...gameState, cardRequest: null },
       gameEnded: gameState.gameEnded,
     };
@@ -502,7 +519,7 @@ export function applyCardTransfer(
   const transferredCards = [...target.cards];
   const rankings = [...gameState.rankings, target.id];
 
-  let updated = players.map((p) => {
+  let updated = basePlayers.map((p) => {
     if (p.id === target.id) {
       return {
         ...p,
@@ -535,12 +552,14 @@ export function applyCardTransfer(
   let currentTurn = gameState.currentTurn;
   let currentLeader = gameState.currentLeader;
 
-  if (currentTurn === target.id) {
-    const nextTurn = findNextActivePlayer(updated, target.id);
+  const turnPlayer = updated.find((p) => p.id === currentTurn);
+  if (!turnPlayer || !isActivePlayer(turnPlayer)) {
+    const nextTurn = findNextActivePlayer(updated, currentTurn ?? target.id);
     currentTurn = nextTurn ? nextTurn.id : null;
   }
-  if (currentLeader === target.id) {
-    const nextLeader = findNextActivePlayer(updated, target.id);
+  const leaderPlayer = updated.find((p) => p.id === currentLeader);
+  if (!leaderPlayer || !isActivePlayer(leaderPlayer)) {
+    const nextLeader = findNextActivePlayer(updated, currentLeader ?? target.id);
     currentLeader = nextLeader ? nextLeader.id : null;
   }
 
