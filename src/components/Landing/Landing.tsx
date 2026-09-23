@@ -11,7 +11,7 @@ export default function Landing() {
     <main className="relative min-h-[100dvh] w-full gradient-purple-blue overflow-hidden flex flex-col items-center justify-center select-none px-6 safe-top safe-bottom">
       <FloatingCards />
 
-      <div className="relative z-10 max-w-sm w-full mx-auto text-center flex flex-col items-center">
+      <div className="relative z-20 max-w-sm w-full mx-auto text-center flex flex-col items-center">
         {/* Ass Logo with Ambient Aurora & Seamless Feathered Edge */}
         <motion.div
           initial={{ opacity: 0, scale: 0.7, y: -20 }}
