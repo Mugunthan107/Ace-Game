@@ -4,6 +4,7 @@ import { GiCrown, GiDonkey } from 'react-icons/gi';
 import { HiOutlineTrophy } from 'react-icons/hi2';
 import { PlayerRow } from '../../types';
 import { isBot } from '../../engine/bot';
+import TurnStarburst from './TurnStarburst';
 
 interface Props {
   player: PlayerRow;
@@ -28,29 +29,26 @@ function PlayerSeat({
   const isCrowded = totalPlayers >= 7;
   const isHuman = !isBot(player);
 
+  // Proportional firework starburst sizing: comfortably bounded so it never overlaps cards, table or adjacent players
+  const burstSizeClass = isVeryCrowded
+    ? 'w-20 h-20 sm:w-26 sm:h-26'
+    : isCrowded
+    ? 'w-24 h-24 sm:w-30 sm:h-30'
+    : 'w-28 h-28 sm:w-36 sm:h-36';
+
   return (
     <div
       style={style}
       onClick={onClick}
       className={`absolute flex flex-col items-center gap-0.5 sm:gap-1 -translate-x-1/2 -translate-y-1/2 z-10 select-none ${
         onClick
-          ? 'pointer-events-auto cursor-pointer hover:scale-110 active:scale-95 transition-transform'
+          ? 'pointer-events-auto cursor-pointer hover:scale-105 active:scale-95 transition-transform'
           : 'pointer-events-none'
       }`}
     >
       <div className="relative flex flex-col items-center">
-
-        {/* Radiant Turn Glowing Auras & Expanding Radar Waves */}
-        {isTurn && (
-          <>
-            {/* Outer expanding radar pulse waves */}
-            <span className="absolute -inset-2.5 sm:-inset-3 rounded-full border-2 border-sky-400 animate-[turn-radar_1.8s_cubic-bezier(0,0,0.2,1)_infinite] pointer-events-none" />
-            <span className="absolute -inset-1.5 sm:-inset-2 rounded-full border border-cyan-300 animate-[turn-radar_1.8s_cubic-bezier(0,0,0.2,1)_0.6s_infinite] pointer-events-none" />
-
-            {/* Radiant ambient glow halo */}
-            <span className="absolute -inset-3.5 sm:-inset-4.5 rounded-full bg-gradient-to-r from-sky-400/60 via-cyan-300/70 to-blue-500/60 blur-lg animate-pulse pointer-events-none" />
-          </>
-        )}
+        {/* Radiant Firework Starburst behind active player (replaces the blue circle) */}
+        {isTurn && <TurnStarburst sizeClass={burstSizeClass} />}
 
         {/* Floating "PLAYING" Beacon Pill above the active player */}
         {isTurn && (
@@ -58,94 +56,109 @@ function PlayerSeat({
             initial={{ scale: 0.8, opacity: 0, y: 3 }}
             animate={{ scale: [1, 1.08, 1], opacity: 1, y: [0, -4, 0] }}
             transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
-            className="absolute -top-5.5 sm:-top-6.5 z-30 flex items-center gap-1 px-1.5 sm:px-2 py-0.5 rounded-full bg-gradient-to-r from-sky-400 via-cyan-300 to-sky-400 text-slate-950 font-black text-[7px] sm:text-[9px] shadow-[0_0_14px_rgba(56,189,248,0.9)] uppercase tracking-wider whitespace-nowrap"
+            className="absolute -top-5.5 sm:-top-6.5 z-30 flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-rose-500 via-pink-500 to-fuchsia-500 text-white font-black text-[7.5px] sm:text-[9px] shadow-[0_0_16px_rgba(244,63,94,0.95)] uppercase tracking-wider whitespace-nowrap border border-white/60"
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-slate-950 animate-ping" />
+            <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
             <span>PLAYING</span>
           </motion.div>
         )}
 
+        {/* Floating Host Crown (centered like Waiting page) */}
+        {player.is_host && (
+          <span className="absolute -top-3 sm:-top-3.5 left-1/2 -translate-x-1/2 text-amber-300 text-sm sm:text-base drop-shadow-[0_2px_6px_rgba(245,158,11,0.8)] z-30">
+            <GiCrown />
+          </span>
+        )}
+
+        {/* 3D Orb Avatar (Exactly styled like the Waiting Room) */}
         <div
-          className={`relative rounded-full flex items-center justify-center font-display font-bold text-white transition-all
-            ${isVeryCrowded ? 'w-7 h-7 sm:w-9 sm:h-9 text-[11px] sm:text-xs' : isCrowded ? 'w-8 h-8 sm:w-11 sm:h-11 text-xs sm:text-sm' : 'w-9 h-9 sm:w-12 sm:h-12 text-xs sm:text-base'}
+          className={`relative rounded-full flex items-center justify-center font-display font-black text-white transition-all overflow-hidden
+            ${
+              isVeryCrowded
+                ? 'w-8 h-8 sm:w-10 sm:h-10 text-xs sm:text-sm'
+                : isCrowded
+                ? 'w-9 h-9 sm:w-12 sm:h-12 text-xs sm:text-base'
+                : 'w-11 h-11 sm:w-13 sm:h-13 text-sm sm:text-lg'
+            }
             ${
               isTurn
-                ? 'border-2 border-white ring-4 ring-sky-300 shadow-[0_0_25px_rgba(56,189,248,1),0_0_50px_rgba(14,165,233,0.7)] animate-turn-glow'
+                ? 'border-2 border-white ring-4 ring-pink-400 shadow-[0_0_24px_rgba(244,63,94,0.95),0_0_45px_rgba(217,70,239,0.65)]'
                 : isMe
-                ? 'border-2 border-sky-400/80 ring-2 ring-sky-400/40 shadow-[0_0_10px_rgba(56,189,248,0.4)]'
+                ? 'border-2 border-cyan-400 ring-2 ring-cyan-400/50 shadow-[0_0_15px_rgba(56,189,248,0.5)]'
                 : 'border-2 border-white/25 shadow-lg'
             }
             ${player.escaped ? 'opacity-40 grayscale' : ''}
             ${isDonkeyCandidate ? 'ring-4 ring-red-500 shadow-[0_0_16px_rgba(239,68,68,0.7)]' : ''}`}
-          style={{ background: player.avatar_color }}
+          style={{
+            background: `linear-gradient(135deg, ${player.avatar_color} 0%, #0f172a 120%)`,
+            boxShadow: isTurn
+              ? '0 0 24px rgba(244,63,94,0.95), inset 0 2px 4px rgba(255,255,255,0.7)'
+              : isMe
+              ? '0 0 15px rgba(56,189,248,0.5), inset 0 2px 4px rgba(255,255,255,0.5)'
+              : `0 6px 16px -2px ${player.avatar_color}66, inset 0 2px 4px rgba(255,255,255,0.45)`,
+          }}
         >
-          {player.name.slice(0, 1).toUpperCase()}
+          {/* 3D Glass Sheen Overlay */}
+          <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/10 to-white/45 pointer-events-none rounded-full" />
 
-          {/* Bot indicator */}
-          {!isHuman && (
-            <span
-              className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 sm:w-4.5 sm:h-4.5 rounded-full bg-slate-900 text-sky-300 flex items-center justify-center text-[8px] sm:text-[9px] shadow border border-sky-400/40"
-              title="Bot"
-            >
-              🤖
-            </span>
-          )}
-
-          {/* Host crown */}
-          {player.is_host && (
-            <span className="absolute -top-2.5 -right-1 text-amber-300 text-xs sm:text-sm drop-shadow">
-              <GiCrown />
-            </span>
-          )}
+          {/* Avatar Initial */}
+          <span className="relative z-10 drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)]">
+            {player.name.slice(0, 1).toUpperCase()}
+          </span>
 
           {/* Trophy on escape */}
           {player.escaped && (
-            <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 sm:w-4.5 sm:h-4.5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[8px] sm:text-[9px] shadow border border-white/50">
+            <span className="absolute -bottom-1 -right-1 w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px] sm:text-[10px] shadow border border-white/50 z-20">
               <HiOutlineTrophy />
             </span>
           )}
 
           {/* Donkey icon if candidate */}
           {isDonkeyCandidate && !player.escaped && (
-            <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 sm:w-4.5 sm:h-4.5 rounded-full bg-red-600 text-white flex items-center justify-center text-[8px] sm:text-[9px] shadow border border-white/50">
+            <span className="absolute -bottom-1 -right-1 w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-red-600 text-white flex items-center justify-center text-[9px] sm:text-[10px] shadow border border-white/50 z-20">
               <GiDonkey />
             </span>
           )}
         </div>
+
+        {/* Small Host / Bot Pill Tag (Positioned right on bottom of avatar like waiting room) */}
+        {player.is_host ? (
+          <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 px-1.5 py-0.2 rounded bg-amber-400 text-slate-950 font-black text-[7px] sm:text-[8px] uppercase tracking-wider shadow z-20 whitespace-nowrap">
+            HOST
+          </span>
+        ) : !isHuman ? (
+          <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 px-1 py-0.2 rounded bg-indigo-600 border border-indigo-400/50 text-white font-black text-[7px] sm:text-[8px] uppercase tracking-wider shadow z-20 whitespace-nowrap">
+            BOT
+          </span>
+        ) : null}
       </div>
 
-      {/* Unified Compact Name & Card Count Pill */}
+      {/* Unified Compact Name & Card Count Pill (Comfortable Width, no aggressive truncation) */}
       <div
-        className={`flex items-center gap-1 glass rounded-full shadow-sm transition-all border ${
-          isVeryCrowded ? 'px-1 py-0.5 max-w-[56px] sm:max-w-[76px]' : isCrowded ? 'px-1.5 py-0.5 max-w-[68px] sm:max-w-[88px]' : 'px-2 py-0.5 max-w-[78px] sm:max-w-[96px]'
-        } ${
+        className={`flex items-center gap-1.5 glass rounded-full shadow-md transition-all border px-2 py-0.5 sm:px-2.5 sm:py-0.8 max-w-[85px] sm:max-w-[110px] mt-1 ${
           isTurn
-            ? 'border-sky-300 bg-sky-950/95 ring-2 ring-sky-400 shadow-[0_0_14px_rgba(56,189,248,0.7)]'
+            ? 'border-pink-400/90 bg-slate-950/95 ring-2 ring-pink-400/80 shadow-[0_0_14px_rgba(244,63,94,0.75)]'
             : isMe
-            ? 'border-sky-400/50 bg-sky-950/60'
-            : 'border-white/15'
+            ? 'border-cyan-400/60 bg-slate-900/90 shadow-[0_0_8px_rgba(56,189,248,0.3)]'
+            : 'border-white/15 bg-slate-950/80'
         }`}
       >
         <span
-          className={`font-semibold truncate ${
-            isVeryCrowded ? 'text-[7px] sm:text-[9px]' : isCrowded ? 'text-[8px] sm:text-[11px]' : 'text-[9px] sm:text-xs'
-          } ${
-            isTurn ? 'text-sky-200 font-extrabold' : isMe ? 'text-sky-300' : 'text-white'
+          className={`font-bold truncate text-[9px] sm:text-xs ${
+            isTurn ? 'text-pink-200 font-extrabold' : isMe ? 'text-cyan-300' : 'text-white'
           }`}
         >
           {player.name}
         </span>
         {isMe && (
-          <span className="text-[6.5px] sm:text-[7.5px] bg-sky-400 text-slate-950 font-black px-1 rounded uppercase shrink-0">
+          <span className="text-[6.5px] sm:text-[7.5px] bg-cyan-400 text-slate-950 font-black px-1 py-0.2 rounded uppercase shrink-0">
             YOU
           </span>
         )}
         {!player.escaped && (
           <span
-            className={`rounded-full font-extrabold shrink-0 ${
-              isVeryCrowded ? 'text-[6.5px] sm:text-[7.5px] px-1 py-[0.5px]' : isCrowded ? 'text-[7px] sm:text-[8px] px-1.5 py-[0.5px]' : 'text-[8px] sm:text-[9px] px-1.5 py-[0.5px]'
-            } ${
-              isTurn ? 'bg-sky-400 text-slate-950' : 'bg-white/20 text-white'
+            className={`rounded-full font-black text-[8px] sm:text-[9px] px-1.5 py-0.2 shrink-0 ${
+              isTurn ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-sm' : 'bg-white/20 text-white'
             }`}
           >
             {player.cards.length}
@@ -157,3 +170,4 @@ function PlayerSeat({
 }
 
 export default memo(PlayerSeat);
+

@@ -99,10 +99,16 @@ export default function CardDealModal({
               <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-3">
                 <div className="flex items-center gap-2.5">
                   <div
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-xs shadow border border-white/30"
-                    style={{ background: selectedTarget.avatar_color }}
+                    className="relative w-9 h-9 rounded-full flex items-center justify-center font-display font-black text-white text-xs shadow-lg border-2 border-white/30 overflow-hidden"
+                    style={{
+                      background: `linear-gradient(135deg, ${selectedTarget.avatar_color} 0%, #0f172a 120%)`,
+                      boxShadow: `0 4px 12px -2px ${selectedTarget.avatar_color}66, inset 0 2px 4px rgba(255,255,255,0.45)`,
+                    }}
                   >
-                    {selectedTarget.name.slice(0, 1).toUpperCase()}
+                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/10 to-white/45 pointer-events-none rounded-full" />
+                    <span className="relative z-10 drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)]">
+                      {selectedTarget.name.slice(0, 1).toUpperCase()}
+                    </span>
                   </div>
                   <div className="text-left">
                     <p className="font-bold text-sm text-white">{selectedTarget.name}</p>

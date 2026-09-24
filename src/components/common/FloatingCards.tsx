@@ -18,15 +18,23 @@ interface CardConfig {
   flipDelay: number;
 }
 
-interface Star {
+interface SyncStar {
+  id: number;
+  top: string;
+  left: string;
+  size: number;
+  phase: number;
+  isHero?: boolean;
+}
+
+interface AmbientStar {
   id: number;
   top: string;
   left: string;
   size: number;
   duration: number;
   delay: number;
-  opacity: number;
-  sparkle?: boolean;
+  maxOpacity: number;
 }
 
 const HIGH_RANKS: Rank[] = ['A', 'K', 'Q', 'J', '10', '9', '8', '7'];
@@ -256,62 +264,138 @@ const DESKTOP_CARDS: CardConfig[] = [
 ];
 
 // ---------------------------------------------------------
-// DESKTOP GALAXY STARS: Subtle, elegant, non-congested
+// SYNCHRONIZED CELESTIAL CONSTELLATION:
+// Exactly 8 phased beacons that hand off the sparkle wave
+// across the night sky in a mathematically synchronized relay.
 // ---------------------------------------------------------
-const GALAXY_STARS: Star[] = [
-  { id: 1, top: '4%', left: '12%', size: 1.5, duration: 3.8, delay: 0.2, opacity: 0.7 },
-  { id: 2, top: '9%', left: '22%', size: 2.2, duration: 4.5, delay: 1.1, opacity: 0.85, sparkle: true },
-  { id: 3, top: '15%', left: '42%', size: 1.2, duration: 3.2, delay: 2.4, opacity: 0.6 },
-  { id: 4, top: '8%', left: '55%', size: 1.8, duration: 5.1, delay: 0.8, opacity: 0.75 },
-  { id: 5, top: '14%', left: '74%', size: 1.2, duration: 4.0, delay: 1.7, opacity: 0.65 },
-  { id: 6, top: '5%', left: '82%', size: 2.0, duration: 4.8, delay: 2.9, opacity: 0.8, sparkle: true },
-  { id: 7, top: '18%', left: '94%', size: 1.5, duration: 3.6, delay: 0.5, opacity: 0.7 },
-  { id: 8, top: '25%', left: '10%', size: 1.2, duration: 4.2, delay: 1.9, opacity: 0.6 },
-  { id: 9, top: '32%', left: '24%', size: 1.8, duration: 5.0, delay: 0.3, opacity: 0.75 },
-  { id: 10, top: '38%', left: '15%', size: 1.0, duration: 3.5, delay: 2.1, opacity: 0.5 },
-  { id: 11, top: '44%', left: '28%', size: 2.2, duration: 4.6, delay: 1.4, opacity: 0.85, sparkle: true },
-  { id: 12, top: '52%', left: '8%', size: 1.5, duration: 3.9, delay: 0.7, opacity: 0.65 },
-  { id: 13, top: '60%', left: '20%', size: 1.2, duration: 4.4, delay: 2.6, opacity: 0.6 },
-  { id: 14, top: '65%', left: '12%', size: 1.8, duration: 5.2, delay: 1.0, opacity: 0.75 },
-  { id: 15, top: '75%', left: '25%', size: 1.5, duration: 3.7, delay: 2.0, opacity: 0.7 },
-  { id: 16, top: '82%', left: '14%', size: 2.0, duration: 4.9, delay: 0.4, opacity: 0.8, sparkle: true },
-  { id: 17, top: '92%', left: '8%', size: 1.2, duration: 3.4, delay: 1.6, opacity: 0.6 },
-  { id: 18, top: '94%', left: '22%', size: 1.6, duration: 4.7, delay: 2.8, opacity: 0.7 },
-  { id: 19, top: '80%', left: '44%', size: 1.2, duration: 3.8, delay: 0.9, opacity: 0.55 },
-  { id: 20, top: '93%', left: '50%', size: 2.2, duration: 5.0, delay: 1.8, opacity: 0.85, sparkle: true },
-  { id: 21, top: '82%', left: '58%', size: 1.5, duration: 4.1, delay: 2.5, opacity: 0.65 },
-  { id: 22, top: '90%', left: '72%', size: 1.8, duration: 4.6, delay: 0.2, opacity: 0.75 },
-  { id: 23, top: '78%', left: '82%', size: 1.2, duration: 3.3, delay: 1.5, opacity: 0.6 },
-  { id: 24, top: '92%', left: '92%', size: 2.0, duration: 4.8, delay: 2.7, opacity: 0.8, sparkle: true },
-  { id: 25, top: '62%', left: '85%', size: 1.5, duration: 3.9, delay: 0.6, opacity: 0.7 },
-  { id: 26, top: '56%', left: '75%', size: 1.2, duration: 4.3, delay: 2.2, opacity: 0.6 },
-  { id: 27, top: '45%', left: '84%', size: 2.2, duration: 5.3, delay: 1.3, opacity: 0.85, sparkle: true },
-  { id: 28, top: '35%', left: '78%', size: 1.5, duration: 3.6, delay: 0.8, opacity: 0.65 },
-  { id: 29, top: '28%', left: '88%', size: 1.8, duration: 4.5, delay: 2.0, opacity: 0.75 },
-  { id: 30, top: '22%', left: '68%', size: 1.2, duration: 3.5, delay: 1.2, opacity: 0.55 },
-  { id: 31, top: '12%', left: '30%', size: 1.5, duration: 4.0, delay: 2.3, opacity: 0.7 },
-  { id: 32, top: '3%', left: '48%', size: 2.0, duration: 4.7, delay: 0.5, opacity: 0.8, sparkle: true },
-  { id: 33, top: '16%', left: '60%', size: 1.2, duration: 3.4, delay: 1.8, opacity: 0.6 },
-  { id: 34, top: '30%', left: '38%', size: 1.0, duration: 4.2, delay: 2.9, opacity: 0.5 },
-  { id: 35, top: '68%', left: '36%', size: 1.2, duration: 3.7, delay: 1.1, opacity: 0.55 },
-  { id: 36, top: '72%', left: '62%', size: 1.5, duration: 4.4, delay: 0.4, opacity: 0.65 },
-  { id: 37, top: '26%', left: '3%', size: 1.8, duration: 5.1, delay: 2.1, opacity: 0.75 },
-  { id: 38, top: '37%', left: '96%', size: 1.2, duration: 3.8, delay: 1.6, opacity: 0.6 },
-  { id: 39, top: '58%', left: '95%', size: 2.0, duration: 4.9, delay: 0.7, opacity: 0.8, sparkle: true },
-  { id: 40, top: '85%', left: '3%', size: 1.5, duration: 3.5, delay: 2.4, opacity: 0.65 },
+// SYNCHRONIZED CELESTIAL CONSTELLATION:
+// Exactly 8 phased beacons that hand off the sparkle wave
+// across the night sky in a mathematically synchronized relay.
+// When one dims low, the next star in another region peaks!
+// ---------------------------------------------------------
+const SYNC_CYCLE_DURATION = 8.0; // 8 seconds per complete cosmic orbit
+
+const ASTROID_STAR_PATH =
+  'M12 0 C12 6.8 17.2 12 24 12 C17.2 12 12 17.2 12 24 C12 17.2 6.8 12 0 12 C6.8 12 12 6.8 12 0 Z';
+
+function CelestialStarSvg({
+  size = 20,
+  isHero = false,
+  color = '#ffffff',
+  glowColor = 'rgba(56,189,248,0.9)',
+}: {
+  size: number;
+  isHero?: boolean;
+  color?: string;
+  glowColor?: string;
+}) {
+  return (
+    <div
+      style={{
+        width: `${size}px`,
+        height: `${size}px`,
+      }}
+      className="relative flex items-center justify-center select-none pointer-events-none"
+    >
+      {/* 4-Point Primary Star Shape */}
+      <svg
+        viewBox="0 0 24 24"
+        className="w-full h-full"
+        style={{
+          filter: `drop-shadow(0 0 ${Math.max(3, size * 0.35)}px ${glowColor})`,
+        }}
+      >
+        <path d={ASTROID_STAR_PATH} fill={color} />
+      </svg>
+
+      {/* 8-Point Secondary Star (45-degree rotated diamond arms for Hero Stars) */}
+      {isHero && (
+        <svg
+          viewBox="0 0 24 24"
+          className="absolute inset-0 w-full h-full rotate-45 scale-60 opacity-85"
+          style={{
+            filter: `drop-shadow(0 0 ${Math.max(2, size * 0.25)}px ${glowColor})`,
+          }}
+        >
+          <path d={ASTROID_STAR_PATH} fill={color} />
+        </svg>
+      )}
+
+      {/* Radiant Diamond Core */}
+      <div
+        className="absolute rounded-full bg-white pointer-events-none"
+        style={{
+          width: `${Math.max(2, size * 0.22)}px`,
+          height: `${Math.max(2, size * 0.22)}px`,
+          boxShadow: `0 0 ${Math.max(4, size * 0.35)}px #ffffff`,
+        }}
+      />
+    </div>
+  );
+}
+
+const SYNCHRONIZED_HERO_STARS: SyncStar[] = [
+  // Phase 0 (0.0s): Top-Left quadrant
+  { id: 101, top: '7%', left: '15%', size: 22, phase: 0, isHero: true },
+  // Phase 1 (1.0s): Bottom-Right quadrant
+  { id: 102, top: '83%', left: '85%', size: 22, phase: 1, isHero: true },
+  // Phase 2 (2.0s): Top-Right quadrant
+  { id: 103, top: '11%', left: '82%', size: 22, phase: 2, isHero: true },
+  // Phase 3 (3.0s): Bottom-Left quadrant
+  { id: 104, top: '80%', left: '13%', size: 22, phase: 3, isHero: true },
+  // Phase 4 (4.0s): Upper-Center quadrant
+  { id: 105, top: '16%', left: '48%', size: 20, phase: 4, isHero: true },
+  // Phase 5 (5.0s): Lower-Center quadrant
+  { id: 106, top: '88%', left: '52%', size: 20, phase: 5, isHero: true },
+  // Phase 6 (6.0s): Mid-West flank
+  { id: 107, top: '48%', left: '6%', size: 21, phase: 6, isHero: true },
+  // Phase 7 (7.0s): Mid-East flank
+  { id: 108, top: '46%', left: '93%', size: 21, phase: 7, isHero: true },
 ];
 
-// ---------------------------------------------------------
-// MOBILE / OLDER CARDS: Preserved exactly as the original
-// ---------------------------------------------------------
-const OLDER_MOBILE_CARDS = [
-  { label: 'A♠', color: '#0f172a', top: '8%', left: '6%', rot: -14, delay: 0, size: 64 },
-  { label: 'K♥', color: '#e11d48', top: '14%', left: '84%', rot: 12, delay: 0.6, size: 74 },
-  { label: 'Q♣', color: '#0f172a', top: '68%', left: '4%', rot: 18, delay: 1.1, size: 58 },
-  { label: 'J♦', color: '#e11d48', top: '76%', left: '88%', rot: -10, delay: 0.3, size: 60 },
-  { label: '10♠', color: '#0f172a', top: '40%', left: '92%', rot: 8, delay: 1.6, size: 50 },
-  { label: '7♥', color: '#e11d48', top: '86%', left: '30%', rot: -6, delay: 0.9, size: 46 },
+const SYNCHRONIZED_COMPANION_STARS: SyncStar[] = [
+  // Phase 0 companion (North-West interior)
+  { id: 201, top: '22%', left: '26%', size: 15, phase: 0 },
+  // Phase 1 companion (South-East interior)
+  { id: 202, top: '72%', left: '76%', size: 15, phase: 1 },
+  // Phase 2 companion (North-East interior)
+  { id: 203, top: '24%', left: '72%', size: 15, phase: 2 },
+  // Phase 3 companion (South-West interior)
+  { id: 204, top: '68%', left: '26%', size: 15, phase: 3 },
+  // Phase 4 companion (Upper North-East)
+  { id: 205, top: '8%', left: '58%', size: 14, phase: 4 },
+  // Phase 5 companion (Lower South-West)
+  { id: 206, top: '93%', left: '42%', size: 14, phase: 5 },
+  // Phase 6 companion (Mid-West interior)
+  { id: 207, top: '34%', left: '18%', size: 15, phase: 6 },
+  // Phase 7 companion (Mid-East interior)
+  { id: 208, top: '60%', left: '84%', size: 15, phase: 7 },
 ];
+
+const AMBIENT_DUST_STARS: AmbientStar[] = [
+  { id: 301, top: '4%', left: '32%', size: 10, duration: 4.2, delay: 0.5, maxOpacity: 0.65 },
+  { id: 302, top: '14%', left: '6%', size: 9, duration: 3.8, delay: 1.2, maxOpacity: 0.6 },
+  { id: 303, top: '19%', left: '92%', size: 10, duration: 4.5, delay: 2.1, maxOpacity: 0.65 },
+  { id: 304, top: '27%', left: '10%', size: 9, duration: 5.0, delay: 0.8, maxOpacity: 0.6 },
+  { id: 305, top: '30%', left: '88%', size: 11, duration: 4.0, delay: 1.7, maxOpacity: 0.7 },
+  { id: 306, top: '39%', left: '22%', size: 9, duration: 4.8, delay: 2.6, maxOpacity: 0.55 },
+  { id: 307, top: '42%', left: '78%', size: 10, duration: 3.6, delay: 0.3, maxOpacity: 0.65 },
+  { id: 308, top: '54%', left: '12%', size: 9, duration: 4.4, delay: 1.9, maxOpacity: 0.6 },
+  { id: 309, top: '58%', left: '88%', size: 10, duration: 5.2, delay: 2.4, maxOpacity: 0.65 },
+  { id: 310, top: '64%', left: '18%', size: 9, duration: 3.9, delay: 0.7, maxOpacity: 0.55 },
+  { id: 311, top: '66%', left: '80%', size: 11, duration: 4.6, delay: 1.5, maxOpacity: 0.7 },
+  { id: 312, top: '75%', left: '8%', size: 9, duration: 4.1, delay: 2.8, maxOpacity: 0.6 },
+  { id: 313, top: '76%', left: '90%', size: 9, duration: 3.7, delay: 0.4, maxOpacity: 0.55 },
+  { id: 314, top: '86%', left: '28%', size: 10, duration: 4.9, delay: 1.8, maxOpacity: 0.65 },
+  { id: 315, top: '88%', left: '70%', size: 9, duration: 4.3, delay: 2.3, maxOpacity: 0.6 },
+  { id: 316, top: '94%', left: '12%', size: 9, duration: 3.5, delay: 0.9, maxOpacity: 0.55 },
+  { id: 317, top: '95%', left: '85%', size: 10, duration: 5.1, delay: 1.6, maxOpacity: 0.65 },
+  { id: 318, top: '5%', left: '75%', size: 9, duration: 4.0, delay: 2.0, maxOpacity: 0.6 },
+  { id: 319, top: '52%', left: '2%', size: 9, duration: 3.9, delay: 1.1, maxOpacity: 0.55 },
+  { id: 320, top: '50%', left: '98%', size: 10, duration: 4.7, delay: 2.7, maxOpacity: 0.65 },
+];
+
+
 
 function DynamicCardItem({
   config,
@@ -511,37 +595,9 @@ export default function FloatingCards() {
 
   return (
     <>
-      {/* 1. MOBILE VIEW: EXACTLY AS OLDER VERSION (< md / < 768px) */}
+      {/* DESKTOP/TABLET GALAXY STARS, COSMIC AURAS & CARDS (Hidden on mobile for pure plain background) */}
       <div
-        className="pointer-events-none absolute inset-0 overflow-hidden hidden sm:block md:hidden select-none z-0"
-        aria-hidden="true"
-      >
-        {OLDER_MOBILE_CARDS.map((c, i) => (
-          <div
-            key={i}
-            className="absolute rounded-xl bg-white shadow-xl shadow-black/40 flex items-center justify-center font-display font-extrabold animate-float"
-            style={{
-              top: c.top,
-              left: c.left,
-              width: c.size,
-              height: c.size * 1.38,
-              color: c.color,
-              fontSize: c.size * 0.3,
-              transform: `rotate(${c.rot}deg)`,
-              animationDelay: `${c.delay}s`,
-              // @ts-expect-error custom css var for rotation in keyframes
-              '--rot': `${c.rot}deg`,
-              opacity: 0.92,
-            }}
-          >
-            {c.label}
-          </div>
-        ))}
-      </div>
-
-      {/* 2. DESKTOP VIEW ONLY (>= md / >= 768px): Cards Galaxy with subtle stars & 3D cards */}
-      <div
-        className="pointer-events-none absolute inset-0 overflow-hidden select-none z-0 hidden md:block"
+        className="pointer-events-none absolute inset-0 overflow-hidden hidden md:block select-none z-0"
         aria-hidden="true"
       >
         {/* Soft cosmic nebula auras - deep, serene, non-congested */}
@@ -563,22 +619,22 @@ export default function FloatingCards() {
             ease: 'easeOut',
             delay: 4,
           }}
-          className="absolute top-4 left-10 w-20 h-[1px] bg-gradient-to-r from-transparent via-cyan-300 to-transparent -rotate-25 pointer-events-none blur-[0.3px]"
+          className="absolute top-4 left-10 w-20 h-[1.5px] bg-gradient-to-r from-transparent via-cyan-300 to-transparent -rotate-25 pointer-events-none blur-[0.3px]"
         />
 
-        {/* Twinkling galaxy starfield - slightly brighter and luminous */}
-        {GALAXY_STARS.map((s) => (
+        {/* 1. Ambient Background Stars (Authentic 4-Point Micro Stars) */}
+        {AMBIENT_DUST_STARS.map((s) => (
           <motion.div
             key={s.id}
             style={{
               top: s.top,
               left: s.left,
-              width: `${s.size}px`,
-              height: `${s.size}px`,
+              position: 'absolute',
+              transform: 'translate(-50%, -50%)',
             }}
             animate={{
-              opacity: [s.opacity * 0.55, Math.min(1, s.opacity * 1.3), s.opacity * 0.55],
-              scale: s.sparkle ? [0.9, 1.4, 0.9] : [0.95, 1.15, 0.95],
+              opacity: [0.22, s.maxOpacity, 0.22],
+              scale: [0.85, 1.15, 0.85],
             }}
             transition={{
               duration: s.duration,
@@ -586,25 +642,85 @@ export default function FloatingCards() {
               ease: 'easeInOut',
               delay: s.delay,
             }}
-            className={`absolute rounded-full pointer-events-none ${
-              s.sparkle
-                ? 'bg-white shadow-[0_0_8px_rgba(56,189,248,1),0_0_3px_#fff]'
-                : 'bg-white shadow-[0_0_5px_rgba(255,255,255,0.9),0_0_2px_rgba(56,189,248,0.5)]'
-            }`}
+            className="pointer-events-none select-none"
           >
-            {s.sparkle && (
-              <div className="absolute -inset-1.5 flex items-center justify-center pointer-events-none opacity-65">
-                <div className="w-3 h-[0.75px] bg-cyan-200 shadow-[0_0_4px_rgba(56,189,248,0.8)]" />
-                <div className="h-3 w-[0.75px] bg-cyan-200 shadow-[0_0_4px_rgba(56,189,248,0.8)] absolute" />
-              </div>
-            )}
+            <CelestialStarSvg
+              size={s.size}
+              color="#ffffff"
+              glowColor="rgba(255,255,255,0.7)"
+            />
+          </motion.div>
+        ))}
+
+        {/* 2. Synchronized Companion Stars (Harmonic 4-Point Stars) */}
+        {SYNCHRONIZED_COMPANION_STARS.map((s) => (
+          <motion.div
+            key={s.id}
+            style={{
+              top: s.top,
+              left: s.left,
+              position: 'absolute',
+              transform: 'translate(-50%, -50%)',
+            }}
+            animate={{
+              opacity: [0.25, 0.25, 0.95, 0.9, 0.25, 0.25],
+              scale: [0.75, 0.75, 1.45, 1.35, 0.75, 0.75],
+            }}
+            transition={{
+              duration: SYNC_CYCLE_DURATION,
+              repeat: Infinity,
+              ease: 'easeInOut',
+              delay: s.phase * 1.0,
+              times: [0, 0.04, 0.11, 0.16, 0.24, 1],
+            }}
+            className="pointer-events-none select-none"
+          >
+            <CelestialStarSvg
+              size={s.size}
+              color="#e0f2fe"
+              glowColor="rgba(56,189,248,0.9)"
+            />
+          </motion.div>
+        ))}
+
+        {/* 3. Synchronized Hero Beacons: 8-Point Royal Celestial Stars */}
+        {SYNCHRONIZED_HERO_STARS.map((s) => (
+          <motion.div
+            key={s.id}
+            style={{
+              top: s.top,
+              left: s.left,
+              position: 'absolute',
+              transform: 'translate(-50%, -50%)',
+            }}
+            animate={{
+              opacity: [0.32, 0.32, 1.0, 1.0, 0.32, 0.32],
+              scale: [0.75, 0.75, 1.6, 1.5, 0.75, 0.75],
+            }}
+            transition={{
+              duration: SYNC_CYCLE_DURATION,
+              repeat: Infinity,
+              ease: 'easeInOut',
+              delay: s.phase * 1.0,
+              times: [0, 0.04, 0.11, 0.16, 0.24, 1],
+            }}
+            className="pointer-events-none select-none"
+          >
+            <CelestialStarSvg
+              size={s.size}
+              isHero={true}
+              color="#ffffff"
+              glowColor="rgba(56,189,248,1)"
+            />
           </motion.div>
         ))}
 
         {/* Celestial Cards Galaxy - Desktop Floating & Flipping Cards */}
-        {DESKTOP_CARDS.map((config) => (
-          <DynamicCardItem key={config.id} config={config} mouseOffset={mouseOffset} />
-        ))}
+        <div className="hidden md:block">
+          {DESKTOP_CARDS.map((config) => (
+            <DynamicCardItem key={config.id} config={config} mouseOffset={mouseOffset} />
+          ))}
+        </div>
       </div>
     </>
   );
