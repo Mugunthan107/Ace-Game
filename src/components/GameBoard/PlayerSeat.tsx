@@ -50,15 +50,15 @@ function PlayerSeat({
         {/* Radiant Firework Starburst behind active player (replaces the blue circle) */}
         {isTurn && <TurnStarburst sizeClass={burstSizeClass} />}
 
-        {/* Floating "PLAYING" Beacon Pill above the active player */}
+        {/* Floating "PLAYING" Beacon Pill above the active player in Pure Gold */}
         {isTurn && (
           <motion.div
             initial={{ scale: 0.8, opacity: 0, y: 3 }}
             animate={{ scale: [1, 1.08, 1], opacity: 1, y: [0, -4, 0] }}
-            transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
-            className="absolute -top-5.5 sm:-top-6.5 z-30 flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-rose-500 via-pink-500 to-fuchsia-500 text-white font-black text-[7.5px] sm:text-[9px] shadow-[0_0_16px_rgba(244,63,94,0.95)] uppercase tracking-wider whitespace-nowrap border border-white/60"
+            transition={{ duration: 1.3, repeat: Infinity, ease: 'easeInOut' }}
+            className="absolute -top-5.5 sm:-top-6.5 z-30 flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 text-slate-950 font-black text-[7.5px] sm:text-[9px] shadow-[0_0_16px_rgba(245,158,11,0.95)] uppercase tracking-wider whitespace-nowrap border border-white/80"
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+            <span className="w-1.5 h-1.5 rounded-full bg-slate-950 animate-ping" />
             <span>PLAYING</span>
           </motion.div>
         )}
@@ -82,7 +82,7 @@ function PlayerSeat({
             }
             ${
               isTurn
-                ? 'border-2 border-white ring-4 ring-pink-400 shadow-[0_0_24px_rgba(244,63,94,0.95),0_0_45px_rgba(217,70,239,0.65)]'
+                ? 'border-2 border-white ring-4 ring-amber-400 shadow-[0_0_24px_rgba(245,158,11,0.95),0_0_45px_rgba(251,191,36,0.65)]'
                 : isMe
                 ? 'border-2 border-cyan-400 ring-2 ring-cyan-400/50 shadow-[0_0_15px_rgba(56,189,248,0.5)]'
                 : 'border-2 border-white/25 shadow-lg'
@@ -92,7 +92,7 @@ function PlayerSeat({
           style={{
             background: `linear-gradient(135deg, ${player.avatar_color} 0%, #0f172a 120%)`,
             boxShadow: isTurn
-              ? '0 0 24px rgba(244,63,94,0.95), inset 0 2px 4px rgba(255,255,255,0.7)'
+              ? '0 0 24px rgba(245,158,11,0.95), inset 0 2px 4px rgba(255,255,255,0.7)'
               : isMe
               ? '0 0 15px rgba(56,189,248,0.5), inset 0 2px 4px rgba(255,255,255,0.5)'
               : `0 6px 16px -2px ${player.avatar_color}66, inset 0 2px 4px rgba(255,255,255,0.45)`,
@@ -137,7 +137,7 @@ function PlayerSeat({
       <div
         className={`flex items-center gap-1.5 glass rounded-full shadow-md transition-all border px-2 py-0.5 sm:px-2.5 sm:py-0.8 max-w-[85px] sm:max-w-[110px] mt-1 ${
           isTurn
-            ? 'border-pink-400/90 bg-slate-950/95 ring-2 ring-pink-400/80 shadow-[0_0_14px_rgba(244,63,94,0.75)]'
+            ? 'border-amber-400/90 bg-slate-950/95 ring-2 ring-amber-400/80 shadow-[0_0_14px_rgba(245,158,11,0.75)]'
             : isMe
             ? 'border-cyan-400/60 bg-slate-900/90 shadow-[0_0_8px_rgba(56,189,248,0.3)]'
             : 'border-white/15 bg-slate-950/80'
@@ -145,7 +145,7 @@ function PlayerSeat({
       >
         <span
           className={`font-bold truncate text-[9px] sm:text-xs ${
-            isTurn ? 'text-pink-200 font-extrabold' : isMe ? 'text-cyan-300' : 'text-white'
+            isTurn ? 'text-amber-200 font-extrabold' : isMe ? 'text-cyan-300' : 'text-white'
           }`}
         >
           {player.name}
@@ -158,7 +158,7 @@ function PlayerSeat({
         {!player.escaped && (
           <span
             className={`rounded-full font-black text-[8px] sm:text-[9px] px-1.5 py-0.2 shrink-0 ${
-              isTurn ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-sm' : 'bg-white/20 text-white'
+              isTurn ? 'bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-400 text-slate-950 font-black shadow-sm' : 'bg-white/20 text-white'
             }`}
           >
             {player.cards.length}
