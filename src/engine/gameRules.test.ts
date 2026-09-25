@@ -1,4 +1,4 @@
-import { applyCardPlay, finalizeTrickResolution, declarePlayerAss, applyCardTransfer, startGameDeal, isActivePlayer } from './gameRules';
+import { applyCardPlay, finalizeTrickResolution, declarePlayerAss, applyCardTransfer, startGameDeal, isActivePlayer, shufflePlayerSeats } from './gameRules';
 import { Card, emptyGameState, GameState, PlayerRow, CardRequest } from '../types';
 
 function createCard(suit: 'spades' | 'hearts' | 'clubs' | 'diamonds', rank: any): Card {
@@ -563,6 +563,72 @@ console.log('--- Running Game Rules Tests ---');
     }
   }
   console.log('✓ Test 12 Passed: All player counts from 3 to 11 successfully tested (buy card, skip 0-card player, complete trick, and lead round 2)');
+}
+
+// Test 13: shufflePlayerSeats produces valid permutations 0..N-1 and ensures different order
+{
+  const p1 = createPlayer('p1', 'Player 1', 0, [createCard('spades', 'A')]);
+  const p2 = createPlayer('p2', 'Player 2', 1, [createCard('hearts', 'K')]);
+  const p3 = createPlayer('p3', 'Player 3', 2, [createCard('diamonds', 'Q')]);
+  const p4 = createPlayer('p4', 'Player 4', 3, [createCard('clubs', 'J')]);
+  const initial = [p1, p2, p3, p4];
+
+  const shuffled = shufflePlayerSeats(initial);
+  assert(shuffled.length === 4, 'Shuffled players count must match');
+  
+  const seatOrders = shuffled.map((p) => p.seat_order).sort();
+  assert(seatOrders.join(',') === '0,1,2,3', `Seat orders must be 0,1,2,3, got ${seatOrders.join(',')}`);
+
+  // Cards and escaped status must be reset
+  assert(shuffled.every((p) => p.cards.length === 0), 'All cards must be cleared on shuffle');
+  assert(shuffled.every((p) => !p.escaped), 'All escaped statuses must be false');
+  assert(shuffled.every((p) => p.escape_rank === null), 'All escape_rank must be null');
+
+  // Verify that the order changed
+  const initialIds = initial.map((p) => p.id);
+  const shuffledSorted = [...shuffled].sort((a, b) => a.seat_order - b.seat_order).map((p) => p.id);
+  assert(
+    shuffledSorted.some((id, idx) => id !== initialIds[idx]),
+    'Shuffled seating order must differ from initial entry order'
+  );
+  console.log('✓ Test 13 Passed: shufflePlayerSeats resets cards and guarantees a new distinct seating order');
+}
+
+// Test 14: Full multi-match cycle: Match 1 in entry order -> Play again -> Match 2 in new shuffled order -> Match 3
+{
+  const p1 = createPlayer('p1', 'Player 1', 0, []);
+  const p2 = createPlayer('p2', 'Player 2', 1, []);
+  const p3 = createPlayer('p3', 'Player 3', 2, []);
+  const p4 = createPlayer('p4', 'Player 4', 3, []);
+
+  // Match 1: entered order 0, 1, 2, 3
+  const match1 = startGameDeal([p1, p2, p3, p4], 1);
+  assert(match1.gameState.matchNumber === 1, 'Match 1 number should be 1');
+  assert(match1.players.map((p) => p.id).join(',') === 'p1,p2,p3,p4', 'Match 1 players should follow entry order');
+
+  // Match 1 ends, host clicks Play Again -> shuffle seats
+  const shuffledForMatch2 = shufflePlayerSeats(match1.players);
+  const match2 = startGameDeal(shuffledForMatch2, 2);
+  assert(match2.gameState.matchNumber === 2, 'Match 2 number should be 2');
+
+  const match2Order = [...match2.players].sort((a, b) => a.seat_order - b.seat_order).map((p) => p.id);
+  assert(
+    match2Order.some((id, idx) => id !== ['p1', 'p2', 'p3', 'p4'][idx]),
+    'Match 2 seating order must be different from Match 1 entry order'
+  );
+
+  // Match 2 ends, host clicks Play Again -> shuffle seats for Match 3
+  const shuffledForMatch3 = shufflePlayerSeats(match2.players);
+  const match3 = startGameDeal(shuffledForMatch3, 3);
+  assert(match3.gameState.matchNumber === 3, 'Match 3 number should be 3');
+
+  const match3Order = [...match3.players].sort((a, b) => a.seat_order - b.seat_order).map((p) => p.id);
+  assert(
+    match3Order.some((id, idx) => id !== match2Order[idx]),
+    'Match 3 seating order must be different from Match 2 order'
+  );
+
+  console.log('✓ Test 14 Passed: Multi-match flow successfully preserves entry order for Match 1, and shuffles for Match 2 and Match 3');
 }
 
 console.log('--- All Game Rules Tests Passed Successfully! ---');

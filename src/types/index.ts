@@ -133,6 +133,7 @@ export interface GameState {
   currentLeader: string | null; // player id who leads this trick
   leadSuit: Suit | null;
   roundNumber: number;
+  matchNumber?: number;
   gameStarted: boolean;
   gameEnded: boolean;
   donkeyPlayerId: string | null;
@@ -163,12 +164,12 @@ export interface RoomRow {
 }
 
 export const AVATAR_COLORS = [
-  '#EC4899', '#2563EB', '#22C55E', '#F59E0B',
-  '#38BDF8', '#A855F7', '#F97316', '#14B8A6',
-  '#EF4444', '#84CC16',
+  '#09fcdfff', '#ff0482ff', '#0845caff', '#04fa5eff', 
+  '#F59E0B', '#26b8f7ff', '#7909e2ff', '#F97316',
+  '#fa0808ff', '#9bfd07ff',
 ];
 
-export function emptyGameState(): GameState {
+export function emptyGameState(matchNumber = 1): GameState {
   return {
     players: [],
     discardPile: [],
@@ -178,6 +179,7 @@ export function emptyGameState(): GameState {
     currentLeader: null,
     leadSuit: null,
     roundNumber: 0,
+    matchNumber,
     gameStarted: false,
     gameEnded: false,
     donkeyPlayerId: null,

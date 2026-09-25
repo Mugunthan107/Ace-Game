@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { GiCrown, GiDonkey } from 'react-icons/gi';
 import { HiOutlineTrophy } from 'react-icons/hi2';
 import { PlayerRow } from '../../types';
@@ -14,6 +14,7 @@ interface Props {
   totalPlayers?: number;
   style?: React.CSSProperties;
   onClick?: () => void;
+  hitReaction?: 'smile' | 'crying' | null;
 }
 
 function PlayerSeat({
@@ -24,6 +25,7 @@ function PlayerSeat({
   totalPlayers = 4,
   style,
   onClick,
+  hitReaction,
 }: Props) {
   const isVeryCrowded = totalPlayers >= 10;
   const isCrowded = totalPlayers >= 7;
@@ -131,6 +133,42 @@ function PlayerSeat({
             BOT
           </span>
         ) : null}
+
+        {/* Hit Reaction Emoji (Smile for hit giver, Crying for hit player) */}
+        <AnimatePresence>
+          {hitReaction && (
+            <motion.div
+              key={`hit-reaction-${hitReaction}`}
+              initial={{ scale: 0, opacity: 0, y: 8 }}
+              animate={{ scale: [0, 1.25, 1], opacity: 1, y: [0, -3, 0] }}
+              exit={{ scale: 0, opacity: 0, y: -6 }}
+              transition={{
+                duration: 0.35,
+                ease: 'easeOut',
+                y: { repeat: Infinity, duration: 1.2, ease: 'easeInOut' },
+              }}
+              className="absolute -top-3.5 -right-3.5 sm:-top-4 sm:-right-4.5 z-40 pointer-events-none select-none drop-shadow-[0_8px_20px_rgba(0,0,0,0.85)]"
+            >
+              <div
+                className={`flex items-center justify-center rounded-full border-2 shadow-2xl transition-all ${
+                  isVeryCrowded
+                    ? 'w-8 h-8 text-xl'
+                    : isCrowded
+                    ? 'w-9 h-9 sm:w-11 sm:h-11 text-2xl sm:text-3xl'
+                    : 'w-11 h-11 sm:w-13 sm:h-13 text-3xl sm:text-4xl'
+                } ${
+                  hitReaction === 'smile'
+                    ? 'bg-amber-950/95 border-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.85)]'
+                    : 'bg-blue-950/95 border-sky-400 shadow-[0_0_20px_rgba(56,189,248,0.85)]'
+                }`}
+              >
+                <span className="leading-none select-none filter drop-shadow-sm">
+                  {hitReaction === 'smile' ? '😄' : '😭'}
+                </span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Unified Compact Name & Card Count Pill (Comfortable Width, no aggressive truncation) */}
@@ -143,6 +181,9 @@ function PlayerSeat({
             : 'border-white/15 bg-slate-950/80'
         }`}
       >
+        <span className="text-[7.5px] sm:text-[8.5px] font-mono font-bold text-cyan-300/80 shrink-0">
+          #{player.seat_order + 1}
+        </span>
         <span
           className={`font-bold truncate text-[9px] sm:text-xs ${
             isTurn ? 'text-amber-200 font-extrabold' : isMe ? 'text-cyan-300' : 'text-white'

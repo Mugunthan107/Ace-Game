@@ -1,4 +1,4 @@
-import { useState, memo } from 'react';
+import { useState, useMemo, memo } from 'react';
 import { motion } from 'framer-motion';
 import {
   HiOutlineClipboard,
@@ -85,8 +85,13 @@ const ProfessionalSeatItem = memo(function ProfessionalSeatItem({
         ) : null}
       </div>
 
+      {/* Seat Number Tag */}
+      <span className="text-[9px] font-mono font-bold text-cyan-300/80 bg-white/5 border border-white/10 px-1.5 py-0.2 rounded-full mt-1.5">
+        Seat {p.seat_order + 1}
+      </span>
+
       {/* Player Name */}
-      <p className="text-white text-xs font-semibold truncate max-w-full text-center mt-1.5 leading-tight">
+      <p className="text-white text-xs font-semibold truncate max-w-full text-center mt-1 leading-tight">
         {p.name}
       </p>
 
@@ -104,6 +109,7 @@ export default function WaitingRoom() {
   const players = useGameStore((s) => s.players);
   const myId = useGameStore((s) => s.myId);
   const startGame = useGameStore((s) => s.startGame);
+  const shuffleSeats = useGameStore((s) => s.shuffleSeats);
   const updateMaxPlayers = useGameStore((s) => s.updateMaxPlayers);
   const cancelRoom = useGameStore((s) => s.cancelRoom);
   const leaveRoom = useGameStore((s) => s.leaveRoom);
@@ -111,6 +117,11 @@ export default function WaitingRoom() {
   const setToast = useGameStore((s) => s.setToast);
   const [copied, setCopied] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
+
+  const sortedPlayers = useMemo(
+    () => [...players].sort((a, b) => (a.seat_order ?? 0) - (b.seat_order ?? 0)),
+    [players]
+  );
 
   const me = players.find((p) => p.id === myId);
 
@@ -158,7 +169,7 @@ export default function WaitingRoom() {
     }
   };
 
-  const emptySlotsCount = Math.max(0, room.max_players - players.length);
+  const emptySlotsCount = Math.max(0, room.max_players - sortedPlayers.length);
 
   return (
     <div className="gradient-purple-blue min-h-[100dvh] relative flex flex-col items-center justify-center p-4 safe-top safe-bottom overflow-y-auto">
@@ -227,15 +238,42 @@ export default function WaitingRoom() {
                 <span className="text-xs font-bold uppercase tracking-wider text-white/80">
                   Players
                 </span>
+                {room.game_state?.matchNumber && room.game_state.matchNumber > 1 && (
+                  <span className="text-[10px] font-bold text-amber-300 bg-amber-950/60 border border-amber-400/30 px-1.5 py-0.2 rounded-full">
+                    Match {room.game_state.matchNumber}
+                  </span>
+                )}
               </div>
-              <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-white/5 text-cyan-300 border border-white/10">
-                {players.length}/{room.max_players}
-              </span>
+              <div className="flex items-center gap-2">
+                {isHost && players.length >= 2 && (
+                  <button
+                    onClick={shuffleSeats}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded bg-sky-500/15 hover:bg-sky-500/25 active:scale-95 text-[10px] font-semibold text-cyan-200 border border-sky-400/30 transition-all"
+                    title="Shuffle seats"
+                  >
+                    <span>🎲 Shuffle</span>
+                  </button>
+                )}
+                <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-white/5 text-cyan-300 border border-white/10">
+                  {players.length}/{room.max_players}
+                </span>
+              </div>
             </div>
+
+            {room.game_state?.matchNumber && room.game_state.matchNumber > 1 && (
+              <div className="w-full mb-3 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500/15 via-sky-500/15 to-indigo-500/15 border border-sky-400/25 flex items-center justify-between text-xs text-sky-200">
+                <div className="flex items-center gap-1.5">
+                  <span>🎲</span>
+                  <span className="text-white font-bold">Seats Shuffled</span>
+                  <span className="text-white/50 text-[11px]">for Match {room.game_state.matchNumber}</span>
+                </div>
+                <span className="text-[10px] text-emerald-300 font-semibold">New Order</span>
+              </div>
+            )}
 
             {/* Compact Seats Roster */}
             <div className="flex flex-wrap items-center justify-center gap-3 py-1">
-              {players.map((p) => (
+              {sortedPlayers.map((p) => (
                 <ProfessionalSeatItem
                   key={p.id}
                   p={p}

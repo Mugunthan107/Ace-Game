@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { Card, PlayerRow, RoomRow, CardRequest, GameState } from '../types';
-import { applyCardPlay, finalizeTrickResolution, startGameDeal, applyCardTransfer, declarePlayerAss, findNextActivePlayer } from '../engine/gameRules';
+import { Card, PlayerRow, RoomRow, CardRequest, GameState, emptyGameState } from '../types';
+import { applyCardPlay, finalizeTrickResolution, startGameDeal, applyCardTransfer, declarePlayerAss, findNextActivePlayer, shufflePlayerSeats } from '../engine/gameRules';
 import { chooseBotCard, isBot } from '../engine/bot';
 import {
   addBotPlayers,
@@ -68,6 +68,7 @@ interface GameStore {
   playCard: (card: Card) => Promise<void>;
   playBotTurn: (botPlayer: PlayerRow) => Promise<void>;
   playAgain: () => Promise<void>;
+  shuffleSeats: () => Promise<void>;
   requestAllCards: (targetPlayerId: string) => Promise<void>;
   acceptCardRequest: () => Promise<void>;
   declineCardRequest: () => Promise<void>;
@@ -431,7 +432,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         return;
       }
 
-      const { players: dealt, gameState } = startGameDeal(allPlayers);
+      const matchNumber = room.game_state?.matchNumber || 1;
+      const { players: dealt, gameState } = startGameDeal(allPlayers, matchNumber);
       await Promise.all(
         dealt.map((p) =>
           updatePlayer(p.id, {
@@ -597,11 +599,64 @@ export const useGameStore = create<GameStore>((set, get) => ({
   playAgain: async () => {
     const { room, players } = get();
     if (!room) return;
-    const reset = players.map((p) => ({ ...p, cards: [], escaped: false, escape_rank: null }));
+
+    // Advance match count for the room
+    const currentMatch = room.game_state?.matchNumber || 1;
+    const nextMatch = currentMatch + 1;
+
+    // Shuffle seats of all players in the room for the new match
+    const shuffled = shufflePlayerSeats(players);
+
+    // Save shuffled seat orders and reset player card states in Supabase
     await Promise.all(
-      reset.map((p) => updatePlayer(p.id, { cards: [], escaped: false, escape_rank: null }))
+      shuffled.map((p) =>
+        updatePlayer(p.id, {
+          seat_order: p.seat_order,
+          cards: [],
+          escaped: false,
+          escape_rank: null,
+        })
+      )
     );
-    await updateRoom(room.id, { status: 'waiting' });
+
+    const freshGameState = emptyGameState(nextMatch);
+
+    // Reset room status to 'waiting' and clear game_state with fresh match number
+    await updateRoom(room.id, {
+      status: 'waiting',
+      game_state: freshGameState,
+    });
+
+    set({
+      players: shuffled,
+      room: {
+        ...room,
+        status: 'waiting',
+        game_state: freshGameState,
+      },
+      toast: `Match ${nextMatch}: Player seats shuffled! 🎲`,
+    });
+  },
+
+  shuffleSeats: async () => {
+    const { room, players, myId } = get();
+    if (!room || !myId) return;
+    const me = players.find((p) => p.id === myId);
+    const isHost = me?.is_host || room.host_id === myId;
+    if (!isHost || room.status !== 'waiting') return;
+
+    const shuffled = shufflePlayerSeats(players);
+    await Promise.all(
+      shuffled.map((p) =>
+        updatePlayer(p.id, {
+          seat_order: p.seat_order,
+        })
+      )
+    );
+    set({
+      players: shuffled,
+      toast: 'Player seats shuffled! 🎲',
+    });
   },
 
   requestAllCards: async (targetPlayerId: string) => {

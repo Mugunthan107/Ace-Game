@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { HiOutlineXMark } from 'react-icons/hi2';
 import { useGameStore, triggerBotTurnIfNeeded } from '../../store/gameStore';
@@ -81,6 +81,55 @@ export default function GameBoard() {
     return getAnticlockwiseSeatPosition(relIdx, seated.length);
   }, [hitCollector, seated, myIdx]);
 
+  // Track active hit event: who gave the hit (smile emoji) and who got hit (crying emoji)
+  // The emoji stays visible until a player puts another card on the table in the next round
+  const [activeHit, setActiveHit] = useState<{
+    hitterId: string;
+    collectorId: string;
+    hitRound: number;
+  } | null>(null);
+  const lastHitAtRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    // When a player puts another card on the table in the next round (roundNumber > hitRound), clear the emoji!
+    if (activeHit && gs && gs.roundNumber > activeHit.hitRound && gs.centerPile.length > 0) {
+      setActiveHit(null);
+      return;
+    }
+
+    if (gs?.lastEvent?.type === 'hit' && gs.lastEventAt) {
+      if (lastHitAtRef.current !== gs.lastEventAt) {
+        lastHitAtRef.current = gs.lastEventAt;
+        const hitter = gs.lastEvent.playerId;
+        const collector = gs.lastEvent.collectorId ?? gs.trickWinnerId;
+        if (hitter && collector) {
+          setActiveHit({
+            hitterId: hitter,
+            collectorId: collector,
+            hitRound: gs.roundNumber,
+          });
+        }
+      }
+    } else if (gs?.hitOccurred) {
+      const hitter = gs.centerPile.at(-1)?.playerId;
+      const collector = gs.trickWinnerId;
+      if (
+        hitter &&
+        collector &&
+        (!activeHit ||
+          activeHit.hitterId !== hitter ||
+          activeHit.collectorId !== collector ||
+          activeHit.hitRound !== gs.roundNumber)
+      ) {
+        setActiveHit({
+          hitterId: hitter,
+          collectorId: collector,
+          hitRound: gs.roundNumber,
+        });
+      }
+    }
+  }, [gs, activeHit]);
+
   // Automated bot turns managed by store orchestrator — fast, robust, no hanging
   useEffect(() => {
     if (me?.is_host) {
@@ -112,6 +161,14 @@ export default function GameBoard() {
           <div className="flex items-center gap-1 sm:gap-1.5 font-semibold">
             <img src="/Ass Logo.png" alt="Ass Logo" className="w-5 h-5 sm:w-6 sm:h-6 object-contain drop-shadow shrink-0" />
             <span className="tracking-wide text-[11px] sm:text-xs">R:{room.code}</span>
+            {gs.matchNumber && gs.matchNumber > 1 && (
+              <>
+                <span className="text-white/40">•</span>
+                <span className="text-amber-300 font-bold text-[10px] sm:text-xs bg-amber-950/70 border border-amber-400/40 px-1.5 py-0.2 rounded">
+                  Match {gs.matchNumber}
+                </span>
+              </>
+            )}
             <span className="text-white/40">•</span>
             <span className="text-sky-300 font-bold text-[11px] sm:text-xs">R{gs.roundNumber}</span>
           </div>
@@ -155,6 +212,19 @@ export default function GameBoard() {
             setSelectedTarget(p);
           };
 
+          // The emoji stays visible until a player puts another card on the table in the next round
+          const hasPutAnotherCard =
+            activeHit && gs.roundNumber > activeHit.hitRound && gs.centerPile.length > 0;
+          const isHitActive = activeHit && !hasPutAnotherCard;
+
+          const hitReaction = isHitActive
+            ? p.id === activeHit.hitterId
+              ? 'smile'
+              : p.id === activeHit.collectorId
+              ? 'crying'
+              : null
+            : null;
+
           return (
             <PlayerSeat
               key={p.id}
@@ -165,6 +235,7 @@ export default function GameBoard() {
               totalPlayers={seated.length}
               style={getAnticlockwiseSeatPosition(relIdx, seated.length)}
               onClick={isEligibleTarget ? handleSeatClick : undefined}
+              hitReaction={hitReaction}
             />
           );
         })}

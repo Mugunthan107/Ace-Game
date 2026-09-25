@@ -163,8 +163,62 @@ export function findNextTrickPlayer(
   return null;
 }
 
+/**
+ * Shuffles player seat positions so that each subsequent match has a new seat order.
+ * Guarantees that the new seat order is different from the current order if total players >= 2.
+ * Also resets in-game state for each player (cards, escaped, escape_rank).
+ */
+export function shufflePlayerSeats(players: PlayerRow[]): PlayerRow[] {
+  const n = players.length;
+  if (n <= 1) {
+    return players.map((p) => ({
+      ...p,
+      seat_order: 0,
+      cards: [],
+      escaped: false,
+      escape_rank: null,
+    }));
+  }
+
+  // Sort by current seat order first
+  const current = [...players].sort(
+    (a, b) => (a.seat_order ?? 0) - (b.seat_order ?? 0) || a.id.localeCompare(b.id)
+  );
+
+  // Generate a random permutation of 0 ... n-1 that is guaranteed different from current [0, 1, ..., n-1]
+  let perm = Array.from({ length: n }, (_, i) => i);
+  let different = false;
+  let attempts = 0;
+
+  while (!different && attempts < 30) {
+    attempts++;
+    for (let i = n - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [perm[i], perm[j]] = [perm[j], perm[i]];
+    }
+    // Check if at least one position moved
+    different = perm.some((newSeat, oldSeat) => newSeat !== oldSeat);
+  }
+
+  // Fallback cyclical shift if pure random matched original
+  if (!different && n >= 2) {
+    perm = Array.from({ length: n }, (_, i) => (i + 1) % n);
+  }
+
+  return current.map((p, idx) => ({
+    ...p,
+    seat_order: perm[idx],
+    cards: [],
+    escaped: false,
+    escape_rank: null,
+  }));
+}
+
 /** Deals a fresh shuffled deck to every seated player and sets up round 1. */
-export function startGameDeal(players: PlayerRow[]): { players: PlayerRow[]; gameState: GameState } {
+export function startGameDeal(
+  players: PlayerRow[],
+  matchNumber: number = 1
+): { players: PlayerRow[]; gameState: GameState } {
   const deck = shuffleDeck(createDeck());
   const hands = dealCards(deck, players.length);
   const sorted = [...players].sort(
@@ -179,10 +233,11 @@ export function startGameDeal(players: PlayerRow[]): { players: PlayerRow[]; gam
   }));
   const firstLeader = findAceSpadesPlayer(updated)!;
   const gameState: GameState = {
-    ...emptyGameState(),
+    ...emptyGameState(matchNumber),
     players: updated,
     gameStarted: true,
     roundNumber: 1,
+    matchNumber,
     currentLeader: firstLeader.id,
     currentTurn: firstLeader.id,
   };
