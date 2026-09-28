@@ -164,7 +164,7 @@ export interface RoomRow {
 }
 
 export const AVATAR_COLORS = [
-  '#09fcdfff', '#ff0482ff', '#0845caff', '#04fa5eff', 
+  '#ff0482ff','#09fcdfff', '#0845caff', '#04fa5eff', 
   '#F59E0B', '#26b8f7ff', '#7909e2ff', '#F97316',
   '#fa0808ff', '#9bfd07ff',
 ];

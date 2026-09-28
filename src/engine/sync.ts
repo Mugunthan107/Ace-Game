@@ -166,6 +166,8 @@ export function roomSync(
   onRoomDeleted: () => void,
   onPlayersChange: (players: PlayerRow[]) => void
 ) {
+  let isWaitingRoom = true;
+
   const channel = supabase
     .channel(`room-${roomId}`)
     .on(
@@ -176,10 +178,11 @@ export function roomSync(
           onRoomDeleted();
         } else {
           const room = payload.new as RoomRow;
+          isWaitingRoom = room.status === 'waiting';
           onRoomChange(room);
           if (room.game_state?.players && room.game_state.players.length > 0) {
             onPlayersChange(room.game_state.players);
-          } else if (room.status === 'waiting') {
+          } else if (isWaitingRoom) {
             // Only re-fetch waiting room players if not yet in game_state
             fetchPlayers(roomId).then(onPlayersChange).catch(() => {});
           }
@@ -189,18 +192,16 @@ export function roomSync(
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'players', filter: `room_id=eq.${roomId}` },
-      async (payload) => {
-        const row = (payload.new || payload.old) as any;
-        if (!row || row.room_id === roomId) {
-          try {
-            const room = await fetchRoom(roomId);
-            if (room && room.status === 'waiting') {
-              const players = await fetchPlayers(roomId);
-              onPlayersChange(players);
-            }
-          } catch {
-            // best-effort fetch
-          }
+      async () => {
+        // Only fetch players if still in the waiting room!
+        // Once the game is playing, players and cards are 100% synchronized via room.game_state.
+        // This eliminates thousands of redundant HTTP API calls and server logs.
+        if (!isWaitingRoom) return;
+        try {
+          const players = await fetchPlayers(roomId);
+          onPlayersChange(players);
+        } catch {
+          // best-effort fetch
         }
       }
     )

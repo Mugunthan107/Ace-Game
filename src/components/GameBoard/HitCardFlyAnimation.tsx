@@ -103,7 +103,7 @@ export default function HitCardFlyAnimation({
             <motion.div
               key={`counter-${landedCount}`}
               initial={{ scale: 0.6, opacity: 0, y: 10 }}
-              animate={{ scale: [1, 1.25, 1], opacity: 1, y: -24 }}
+              animate={{ scale: [1, 1.25, 1], opacity: 1, y: 26 }}
               exit={{ opacity: 0, scale: 0.8 }}
               transition={{ duration: 0.35, ease: 'easeOut' }}
               className="px-2 py-0.5 rounded-full bg-rose-600 text-white font-black text-[9px] sm:text-[11px] shadow-[0_0_16px_rgba(244,63,94,0.9)] border border-white/60 tracking-wider whitespace-nowrap uppercase flex items-center gap-1"

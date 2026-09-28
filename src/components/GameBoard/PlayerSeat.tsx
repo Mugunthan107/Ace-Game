@@ -6,6 +6,15 @@ import { PlayerRow } from '../../types';
 import { isBot } from '../../engine/bot';
 import TurnStarburst from './TurnStarburst';
 
+export type HitReaction =
+  | 'smile'
+  | 'crying'
+  | {
+      role: 'hitter' | 'collector';
+      emoji: string;
+    }
+  | null;
+
 interface Props {
   player: PlayerRow;
   isTurn: boolean;
@@ -14,7 +23,7 @@ interface Props {
   totalPlayers?: number;
   style?: React.CSSProperties;
   onClick?: () => void;
-  hitReaction?: 'smile' | 'crying' | null;
+  hitReaction?: HitReaction;
 }
 
 function PlayerSeat({
@@ -30,6 +39,24 @@ function PlayerSeat({
   const isVeryCrowded = totalPlayers >= 10;
   const isCrowded = totalPlayers >= 7;
   const isHuman = !isBot(player);
+
+  const reactionRole =
+    typeof hitReaction === 'object' && hitReaction !== null
+      ? hitReaction.role
+      : hitReaction === 'smile'
+      ? 'hitter'
+      : hitReaction === 'crying'
+      ? 'collector'
+      : null;
+
+  const reactionEmoji =
+    typeof hitReaction === 'object' && hitReaction !== null
+      ? hitReaction.emoji
+      : hitReaction === 'smile'
+      ? '😄'
+      : hitReaction === 'crying'
+      ? '😭'
+      : null;
 
   // Proportional firework starburst sizing: comfortably bounded so it never overlaps cards, table or adjacent players
   const burstSizeClass = isVeryCrowded
@@ -134,37 +161,44 @@ function PlayerSeat({
           </span>
         ) : null}
 
-        {/* Hit Reaction Emoji (Smile for hit giver, Crying for hit player) */}
+        {/* Hit Reaction Floating Speech Bubble (Smile/Silence for hit giver, Crying/Tear for hit player) */}
         <AnimatePresence>
-          {hitReaction && (
+          {hitReaction && reactionRole && reactionEmoji && (
             <motion.div
-              key={`hit-reaction-${hitReaction}`}
+              key={`hit-reaction-${reactionEmoji}`}
               initial={{ scale: 0, opacity: 0, y: 8 }}
-              animate={{ scale: [0, 1.25, 1], opacity: 1, y: [0, -3, 0] }}
+              animate={{ scale: [0, 1.15, 1], opacity: 1, y: [0, -3, 0] }}
               exit={{ scale: 0, opacity: 0, y: -6 }}
               transition={{
-                duration: 0.35,
+                duration: 0.32,
                 ease: 'easeOut',
-                y: { repeat: Infinity, duration: 1.2, ease: 'easeInOut' },
+                y: { repeat: Infinity, duration: 1.4, ease: 'easeInOut' },
               }}
-              className="absolute -top-3.5 -right-3.5 sm:-top-4 sm:-right-4.5 z-40 pointer-events-none select-none drop-shadow-[0_8px_20px_rgba(0,0,0,0.85)]"
+              className={`absolute left-1/2 -translate-x-1/2 z-40 pointer-events-none select-none flex flex-col items-center filter drop-shadow-[0_4px_14px_rgba(0,0,0,0.85)] ${
+                isTurn
+                  ? '-top-13 sm:-top-15'
+                  : player.is_host
+                  ? '-top-10 sm:-top-12'
+                  : '-top-8.5 sm:-top-10.5'
+              }`}
             >
               <div
-                className={`flex items-center justify-center rounded-full border-2 shadow-2xl transition-all ${
-                  isVeryCrowded
-                    ? 'w-8 h-8 text-xl'
-                    : isCrowded
-                    ? 'w-9 h-9 sm:w-11 sm:h-11 text-2xl sm:text-3xl'
-                    : 'w-11 h-11 sm:w-13 sm:h-13 text-3xl sm:text-4xl'
-                } ${
-                  hitReaction === 'smile'
-                    ? 'bg-amber-950/95 border-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.85)]'
-                    : 'bg-blue-950/95 border-sky-400 shadow-[0_0_20px_rgba(56,189,248,0.85)]'
+                className={`relative flex items-center justify-center rounded-2xl px-2 py-0.5 sm:px-2.5 sm:py-1 border-2 shadow-2xl transition-all ${
+                  reactionRole === 'hitter'
+                    ? 'bg-gradient-to-b from-amber-900/95 to-amber-950/95 border-amber-400 text-amber-200 shadow-[0_0_16px_rgba(245,158,11,0.8)]'
+                    : 'bg-gradient-to-b from-blue-900/95 to-blue-950/95 border-sky-400 text-sky-200 shadow-[0_0_16px_rgba(56,189,248,0.8)]'
                 }`}
               >
-                <span className="leading-none select-none filter drop-shadow-sm">
-                  {hitReaction === 'smile' ? '😄' : '😭'}
+                <span className="leading-none text-xl sm:text-2xl select-none filter drop-shadow">
+                  {reactionEmoji}
                 </span>
+
+                {/* Speech bubble pointer pointing down toward the avatar */}
+                <div
+                  className={`absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-0 h-0 border-x-4 border-x-transparent border-t-[6px] ${
+                    reactionRole === 'hitter' ? 'border-t-amber-400' : 'border-t-sky-400'
+                  }`}
+                />
               </div>
             </motion.div>
           )}

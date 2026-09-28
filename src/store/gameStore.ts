@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { Card, PlayerRow, RoomRow, CardRequest, GameState, emptyGameState } from '../types';
-import { applyCardPlay, finalizeTrickResolution, startGameDeal, applyCardTransfer, declarePlayerAss, findNextActivePlayer, shufflePlayerSeats } from '../engine/gameRules';
+import { Card, PlayerRow, RoomRow, CardRequest, GameState, emptyGameState, Suit } from '../types';
+import { applyCardPlay, finalizeTrickResolution, startGameDeal, applyCardTransfer, declarePlayerAss, findNextActivePlayer, shufflePlayerSeats, resolveTrick } from '../engine/gameRules';
 import { chooseBotCard, isBot } from '../engine/bot';
 import {
   addBotPlayers,
@@ -78,6 +78,120 @@ interface GameStore {
 
 let botTurnTimeout: ReturnType<typeof setTimeout> | null = null;
 let currentScheduledTurnKey: string | null = null;
+let pendingTrickTimeout: ReturnType<typeof setTimeout> | null = null;
+let currentPendingTrickKey: string | null = null;
+let isResolvingTrick = false;
+
+/**
+ * Self-healing trick resolver:
+ * Safely finalizes any trick that ended (e.g. off-suit hit or clean round completion).
+ * Guarantees cards are collected, round increments, and turns advance even if the player
+ * who played the card disconnected, closed the browser, or had background JS throttled.
+ */
+export async function resolvePendingTrick(getState: () => GameStore): Promise<void> {
+  if (isResolvingTrick) return;
+
+  const state = getState();
+  const { room, players } = state;
+  if (!room || room.status !== 'playing' || room.game_state.gameEnded) return;
+
+  const gs = room.game_state;
+  // A trick is pending resolution only if centerPile has cards and currentTurn is null
+  if (!gs.centerPile || gs.centerPile.length === 0 || gs.currentTurn !== null) {
+    return;
+  }
+
+  const effectiveLeadSuit = (gs.leadSuit || gs.centerPile[0]?.card.suit) as Suit;
+  if (!effectiveLeadSuit) return;
+
+  isResolvingTrick = true;
+
+  try {
+    const resolution = resolveTrick(gs.centerPile, effectiveLeadSuit);
+    const currentPlayers =
+      gs.players && gs.players.length > 0 ? gs.players : players;
+
+    const trickGameState: GameState = {
+      ...gs,
+      centerPile: gs.centerPile,
+      leadSuit: effectiveLeadSuit,
+    };
+
+    const step2 = finalizeTrickResolution(currentPlayers, trickGameState, resolution);
+
+    // Optimistic collection update: pile transfers to collector, new round begins
+    useGameStore.setState({
+      players: step2.players,
+      room: { ...room, game_state: step2.gameState },
+    });
+
+    // Background sync canonical game_state to Supabase in 1 atomic write
+    await updateGameState(room.id, step2.gameState);
+
+    if (step2.gameEnded) {
+      await updateRoom(room.id, { status: 'ended' }).catch(() => {});
+    } else {
+      triggerBotTurnIfNeeded(getState);
+    }
+  } catch (err) {
+    console.error('Failed to resolve pending trick:', err);
+  } finally {
+    isResolvingTrick = false;
+  }
+}
+
+/**
+ * Monitors pending tricks and schedules automatic finalization:
+ * - Host acts as the primary resolver at 3500ms (matching the observation window).
+ * - Other active clients act as a fallback safety watchdog at 5000ms if host disconnected or stalled.
+ */
+export function checkAndResolvePendingTrick(getState: () => GameStore) {
+  const state = getState();
+  const { room, players, myId } = state;
+  if (!room || room.status !== 'playing' || room.game_state.gameEnded) {
+    if (pendingTrickTimeout) {
+      clearTimeout(pendingTrickTimeout);
+      pendingTrickTimeout = null;
+    }
+    currentPendingTrickKey = null;
+    return;
+  }
+
+  const gs = room.game_state;
+  if (gs.currentTurn !== null || !gs.centerPile || gs.centerPile.length === 0) {
+    if (pendingTrickTimeout) {
+      clearTimeout(pendingTrickTimeout);
+      pendingTrickTimeout = null;
+    }
+    currentPendingTrickKey = null;
+    return;
+  }
+
+  const me = players.find((p) => p.id === myId);
+  const isHost = me?.is_host || room.host_id === myId;
+
+  const trickKey = `${gs.matchNumber ?? 1}-${gs.roundNumber}-${gs.centerPile.length}-${gs.lastEventAt || 0}`;
+
+  // Time elapsed since trick ended (step 1)
+  const elapsed = gs.lastEventAt ? Date.now() - gs.lastEventAt : 3500;
+
+  // Host resolves at 3500ms; others at 5000ms as a backup safety net
+  const targetDelay = isHost ? 3500 : 5000;
+  const remainingWait = Math.max(50, targetDelay - elapsed);
+
+  if (currentPendingTrickKey === trickKey && pendingTrickTimeout) {
+    return;
+  }
+
+  currentPendingTrickKey = trickKey;
+  if (pendingTrickTimeout) clearTimeout(pendingTrickTimeout);
+
+  pendingTrickTimeout = setTimeout(() => {
+    pendingTrickTimeout = null;
+    currentPendingTrickKey = null;
+    resolvePendingTrick(getState);
+  }, remainingWait);
+}
 
 export function triggerBotTurnIfNeeded(getState: () => GameStore) {
   const state = getState();
@@ -92,8 +206,11 @@ export function triggerBotTurnIfNeeded(getState: () => GameStore) {
   }
 
   const gs = room.game_state;
-  // If no turn set (e.g. during trick observation), pause
+  // If no turn set (e.g. during trick observation), check for pending trick resolution!
   if (!gs.currentTurn) {
+    if (gs.centerPile && gs.centerPile.length > 0) {
+      checkAndResolvePendingTrick(getState);
+    }
     return;
   }
 
@@ -502,62 +619,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
       room: { ...room, game_state: step1.gameState },
     });
 
-    // Background sync to database
-    const actorPlayer = step1.players.find((p: PlayerRow) => p.id === actorId);
-    if (actorPlayer) {
-      updatePlayer(actorId, { cards: actorPlayer.cards }).catch(() => {});
-    }
+    // Background sync to database in 1 atomic write (step1.gameState.players already holds actor cards)
     await updateGameState(room.id, step1.gameState);
 
-    // 2. If this trick ended (hit or clean round complete), keep cards on table first!
+    // 2. If this trick ended (hit or clean round complete), schedule observation and resolution!
     if (step1.isPendingResolution && step1.resolution) {
-      const resolution = step1.resolution;
+      // Schedule auto-resolution across all connected clients
+      checkAndResolvePendingTrick(get);
 
-      // Keep cards on table for 3500ms so all players clearly see every card discarded in this round
+      // Local actor also attempts resolution after observation window
       await new Promise((resolve) => setTimeout(resolve, 3500));
-
-      const { room: currentRoom, players: currentPlayers } = get();
-      if (!currentRoom) return;
-
-      // Ensure we use the exact centerPile from step1 that ended the trick
-      const trickGameState: GameState = {
-        ...currentRoom.game_state,
-        centerPile: step1.gameState.centerPile,
-        leadSuit: step1.gameState.leadSuit,
-      };
-
-      const step2 = finalizeTrickResolution(currentPlayers, trickGameState, resolution);
-
-      // Optimistic collection update: pile transfers to collector
-      set({
-        players: step2.players,
-        room: { ...currentRoom, game_state: step2.gameState },
-      });
-
-      // Background sync changes to DB
-      const beforeById = new Map(currentPlayers.map((p) => [p.id, p]));
-      const changed = step2.players.filter((p: PlayerRow) => {
-        const before = beforeById.get(p.id);
-        return (
-          !before ||
-          before.cards !== p.cards ||
-          before.escaped !== p.escaped ||
-          before.escape_rank !== p.escape_rank
-        );
-      });
-
-      await Promise.all(
-        changed.map((p) =>
-          updatePlayer(p.id, { cards: p.cards, escaped: p.escaped, escape_rank: p.escape_rank })
-        )
-      );
-      await updateGameState(currentRoom.id, step2.gameState);
-
-      if (step2.gameEnded) {
-        await updateRoom(currentRoom.id, { status: 'ended' });
-      } else {
-        triggerBotTurnIfNeeded(get);
-      }
+      await resolvePendingTrick(get);
     } else {
       triggerBotTurnIfNeeded(get);
     }
@@ -780,29 +852,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       toast: `${req.targetName} gave all cards to ${req.requesterName} and escaped as a Winner! 🏆`,
     });
 
-    // Background sync
-    const targetPlayer = result.players.find((p) => p.id === req.targetId);
-    const reqPlayer = result.players.find((p) => p.id === req.requesterId);
-
-    const syncPromises: Promise<any>[] = [
-      updateGameState(room.id, result.gameState),
-    ];
-    if (targetPlayer) {
-      syncPromises.push(
-        updatePlayer(targetPlayer.id, {
-          cards: [],
-          escaped: true,
-          escape_rank: targetPlayer.escape_rank,
-        }).catch(() => {})
-      );
-    }
-    if (reqPlayer) {
-      syncPromises.push(
-        updatePlayer(reqPlayer.id, { cards: reqPlayer.cards }).catch(() => {})
-      );
-    }
-
-    await Promise.all(syncPromises);
+    // Background sync canonical game_state in 1 atomic write
+    await updateGameState(room.id, result.gameState);
 
     if (result.gameEnded) {
       await updateRoom(room.id, { status: 'ended' });

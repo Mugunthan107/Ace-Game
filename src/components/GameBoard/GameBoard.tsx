@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { HiOutlineXMark } from 'react-icons/hi2';
-import { useGameStore, triggerBotTurnIfNeeded } from '../../store/gameStore';
+import { useGameStore, triggerBotTurnIfNeeded, checkAndResolvePendingTrick } from '../../store/gameStore';
 import { PlayerRow } from '../../types';
 import { isBot } from '../../engine/bot';
 import PlayerSeat from './PlayerSeat';
@@ -81,14 +81,20 @@ export default function GameBoard() {
     return getAnticlockwiseSeatPosition(relIdx, seated.length);
   }, [hitCollector, seated, myIdx]);
 
-  // Track active hit event: who gave the hit (smile emoji) and who got hit (crying emoji)
-  // The emoji stays visible until a player puts another card on the table in the next round
+  const HITTER_EMOJIS = useMemo(() => ['😄', '🤫', '😎', '🤪', '🤭', '🤣'] as const, []);
+  const COLLECTOR_EMOJIS = useMemo(() => ['😭', '😢', '🥴', '😵', '😵‍💫','🥺'] as const, []);
+
   const [activeHit, setActiveHit] = useState<{
     hitterId: string;
     collectorId: string;
     hitRound: number;
+    hitterEmoji: string;
+    collectorEmoji: string;
   } | null>(null);
-  const lastHitAtRef = useRef<number | null>(null);
+
+  const lastProcessedHitKeyRef = useRef<string | null>(null);
+  const lastHitterIdxRef = useRef<number>(-1);
+  const lastCollectorIdxRef = useRef<number>(-1);
 
   useEffect(() => {
     // When a player puts another card on the table in the next round (roundNumber > hitRound), clear the emoji!
@@ -97,38 +103,48 @@ export default function GameBoard() {
       return;
     }
 
+    let hitter: string | undefined;
+    let collector: string | undefined;
+
     if (gs?.lastEvent?.type === 'hit' && gs.lastEventAt) {
-      if (lastHitAtRef.current !== gs.lastEventAt) {
-        lastHitAtRef.current = gs.lastEventAt;
-        const hitter = gs.lastEvent.playerId;
-        const collector = gs.lastEvent.collectorId ?? gs.trickWinnerId;
-        if (hitter && collector) {
-          setActiveHit({
-            hitterId: hitter,
-            collectorId: collector,
-            hitRound: gs.roundNumber,
-          });
-        }
-      }
+      hitter = gs.lastEvent.playerId;
+      collector = gs.lastEvent.collectorId ?? gs.trickWinnerId ?? undefined;
     } else if (gs?.hitOccurred) {
-      const hitter = gs.centerPile.at(-1)?.playerId;
-      const collector = gs.trickWinnerId;
-      if (
-        hitter &&
-        collector &&
-        (!activeHit ||
-          activeHit.hitterId !== hitter ||
-          activeHit.collectorId !== collector ||
-          activeHit.hitRound !== gs.roundNumber)
-      ) {
+      hitter = gs.centerPile.at(-1)?.playerId;
+      collector = gs.trickWinnerId ?? undefined;
+    }
+
+    if (hitter && collector && gs) {
+      const hitKey = `${gs.matchNumber ?? 1}-${gs.roundNumber}-${hitter}-${collector}-${gs.lastEventAt ?? ''}`;
+      if (lastProcessedHitKeyRef.current !== hitKey) {
+        lastProcessedHitKeyRef.current = hitKey;
+
+        // Generate random hitter emoji (guaranteed different from previous hit)
+        let nextHitterIdx = Math.floor(Math.random() * (HITTER_EMOJIS.length - 1));
+        if (lastHitterIdxRef.current !== -1 && nextHitterIdx >= lastHitterIdxRef.current) {
+          nextHitterIdx++;
+        }
+        lastHitterIdxRef.current = nextHitterIdx;
+        const hitterEmoji = HITTER_EMOJIS[nextHitterIdx];
+
+        // Generate random collector emoji (guaranteed different from previous hit)
+        let nextCollectorIdx = Math.floor(Math.random() * (COLLECTOR_EMOJIS.length - 1));
+        if (lastCollectorIdxRef.current !== -1 && nextCollectorIdx >= lastCollectorIdxRef.current) {
+          nextCollectorIdx++;
+        }
+        lastCollectorIdxRef.current = nextCollectorIdx;
+        const collectorEmoji = COLLECTOR_EMOJIS[nextCollectorIdx];
+
         setActiveHit({
           hitterId: hitter,
           collectorId: collector,
           hitRound: gs.roundNumber,
+          hitterEmoji,
+          collectorEmoji,
         });
       }
     }
-  }, [gs, activeHit]);
+  }, [gs, activeHit, HITTER_EMOJIS, COLLECTOR_EMOJIS]);
 
   // Automated bot turns managed by store orchestrator — fast, robust, no hanging
   useEffect(() => {
@@ -136,6 +152,23 @@ export default function GameBoard() {
       triggerBotTurnIfNeeded(useGameStore.getState);
     }
   }, [gs?.currentTurn, gs?.roundNumber, gs?.centerPile.length, gs?.gameEnded, me?.is_host]);
+
+  // Self-healing watchdog: auto-resolves any pending trick if stuck (e.g. hit or round observation timeout)
+  useEffect(() => {
+    if (!gs || gs.gameEnded || !gs.gameStarted) return;
+    if (gs.currentTurn === null && gs.centerPile.length > 0) {
+      checkAndResolvePendingTrick(useGameStore.getState);
+      const interval = setInterval(() => {
+        const curGs = useGameStore.getState().room?.game_state;
+        if (curGs && curGs.currentTurn === null && curGs.centerPile.length > 0) {
+          checkAndResolvePendingTrick(useGameStore.getState);
+        } else {
+          clearInterval(interval);
+        }
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [gs?.currentTurn, gs?.centerPile.length, gs?.roundNumber, gs?.lastEventAt, me?.is_host]);
 
   if (!room || !me || !gs) return null;
 
@@ -182,7 +215,7 @@ export default function GameBoard() {
               className="px-2 py-1 rounded-full bg-gradient-to-r from-red-600 via-rose-600 to-red-700 hover:from-red-500 hover:to-rose-500 text-white font-extrabold text-[10px] sm:text-xs shadow-[0_0_12px_rgba(225,29,72,0.6)] border border-rose-400/50 flex items-center gap-1 active:scale-95 transition-all animate-pulse shrink-0"
               title="Declare yourself as Donkey"
             >
-              <span>🫏</span>
+              <span>🫏🫏</span>
               <span className="tracking-wide uppercase hidden sm:inline">Donkey</span>
             </button>
           )}
@@ -219,9 +252,9 @@ export default function GameBoard() {
 
           const hitReaction = isHitActive
             ? p.id === activeHit.hitterId
-              ? 'smile'
+              ? { role: 'hitter' as const, emoji: activeHit.hitterEmoji }
               : p.id === activeHit.collectorId
-              ? 'crying'
+              ? { role: 'collector' as const, emoji: activeHit.collectorEmoji }
               : null
             : null;
 
