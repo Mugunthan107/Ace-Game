@@ -32,7 +32,7 @@ function useIsMobile(breakpoint = 640) {
 
 export default function CardHand({ hand, leadSuit, roundNumber, isMyTurn, onPlay, escaped }: Props) {
   // Always sort and group hand cards: Spades, Hearts, Clubs, Diamonds; within suit A -> 2
-  const sortedHand = useMemo(() => sortHand(hand), [hand]);
+  const sortedHand = useMemo(() => sortHand(hand || []), [hand]);
   const legal = isMyTurn ? legalCardIds(sortedHand, leadSuit, roundNumber) : new Set<string>();
   const [isDragging, setIsDragging] = useState(false);
   const lastDragTimeRef = useRef(0);

@@ -54,8 +54,38 @@ export default function GameBoard() {
   const [selectedTarget, setSelectedTarget] = useState<PlayerRow | null>(null);
   const [showAssConfirm, setShowAssConfirm] = useState(false);
 
-  const seated = useMemo(() => [...players].sort((a, b) => a.seat_order - b.seat_order), [players]);
-  const me = players.find((p) => p.id === myId);
+  const gs = room?.game_state;
+  const isRoundActive = (gs?.centerPile.length ?? 0) > 0;
+
+  // Authoritative in-game players with filtered discarded cards
+  const effectivePlayers = useMemo(() => {
+    const baseList =
+      room?.status !== 'waiting' && gs?.players && gs.players.length > 0
+        ? gs.players
+        : players;
+
+    if (!gs || (!gs.discardPile?.length && !gs.centerPile?.length)) {
+      return baseList;
+    }
+
+    const playedIds = new Set<string>();
+    for (const c of gs.discardPile || []) {
+      if (c?.id) playedIds.add(c.id);
+    }
+    for (const tc of gs.centerPile || []) {
+      if (tc?.card?.id) playedIds.add(tc.card.id);
+    }
+
+    return baseList.map((p) => {
+      const cards = Array.isArray(p.cards) ? p.cards : [];
+      const filtered = cards.filter((c) => c?.id && !playedIds.has(c.id));
+      if (filtered.length === cards.length) return p;
+      return { ...p, cards: filtered };
+    });
+  }, [room?.status, players, gs]);
+
+  const seated = useMemo(() => [...effectivePlayers].sort((a, b) => a.seat_order - b.seat_order), [effectivePlayers]);
+  const me = useMemo(() => effectivePlayers.find((p) => p.id === myId), [effectivePlayers, myId]);
 
   // Local user's seat index in official seat order
   const myIdx = useMemo(() => {
@@ -63,14 +93,11 @@ export default function GameBoard() {
     return idx >= 0 ? idx : 0;
   }, [seated, myId]);
 
-  const gs = room?.game_state;
-  const isRoundActive = (gs?.centerPile.length ?? 0) > 0;
-
   // Identify the player who was hit and must collect the cards
   const hitCollector = useMemo(() => {
     if (!gs?.hitOccurred || !gs?.trickWinnerId) return null;
-    return players.find((p) => p.id === gs.trickWinnerId) ?? null;
-  }, [gs, players]);
+    return effectivePlayers.find((p) => p.id === gs.trickWinnerId) ?? null;
+  }, [gs, effectivePlayers]);
 
   // Compute table position of collector for sequential card flying animation
   const collectorSeatPos = useMemo(() => {
@@ -174,7 +201,7 @@ export default function GameBoard() {
 
   const hasPlayedThisRound = gs.centerPile.some((tc) => tc.playerId === myId);
   const isMyTurn = gs.currentTurn === myId && !hasPlayedThisRound && !gs.gameEnded && !me.escaped && me.cards.length > 0;
-  const activeRemaining = players.filter((p) => !p.escaped && p.cards.length > 0);
+  const activeRemaining = effectivePlayers.filter((p) => !p.escaped && p.cards.length > 0);
   const donkeyCandidateId = activeRemaining.length === 1 ? activeRemaining[0].id : null;
   const isFinalTwo = activeRemaining.length === 2 && !me.escaped && !gs.gameEnded && activeRemaining.some((p) => p.id === myId);
 
@@ -324,12 +351,12 @@ export default function GameBoard() {
                 <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping" />
                 <span>YOUR TURN</span>
               </motion.div>
-            ) : players.find((p) => p.id === gs.currentTurn && !p.escaped && p.cards.length > 0) ? (
+            ) : effectivePlayers.find((p) => p.id === gs.currentTurn && !p.escaped && p.cards.length > 0) ? (
               <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-900/80 border border-white/10 text-white/80 text-[10px] sm:text-xs font-semibold">
                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
                 <span className="truncate max-w-[130px]">
-                  {players.find((p) => p.id === gs.currentTurn)?.name ?? 'Player'}
-                  {isBot(players.find((p) => p.id === gs.currentTurn), myId) ? ' thinking...' : ' playing...'}
+                  {effectivePlayers.find((p) => p.id === gs.currentTurn)?.name ?? 'Player'}
+                  {isBot(effectivePlayers.find((p) => p.id === gs.currentTurn), myId) ? ' thinking...' : ' playing...'}
                 </span>
               </div>
             ) : null}
@@ -355,7 +382,7 @@ export default function GameBoard() {
 
       {gs.gameEnded && (
         <EndGameModal
-          players={players}
+          players={effectivePlayers}
           rankings={gs.rankings}
           donkeyId={gs.donkeyPlayerId}
           isHost={me.is_host}

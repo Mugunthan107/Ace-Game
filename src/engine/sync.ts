@@ -164,12 +164,14 @@ export function roomSync(
   roomId: string,
   onRoomChange: (room: RoomRow) => void,
   onRoomDeleted: () => void,
-  onPlayersChange: (players: PlayerRow[]) => void
+  onPlayersChange: (players: PlayerRow[]) => void,
+  initialStatus: 'waiting' | 'playing' | 'ended' = 'waiting'
 ) {
-  let isWaitingRoom = true;
+  let isWaitingRoom = initialStatus === 'waiting';
 
+  const channelName = `room-${roomId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const channel = supabase
-    .channel(`room-${roomId}`)
+    .channel(channelName)
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
@@ -184,7 +186,9 @@ export function roomSync(
             onPlayersChange(room.game_state.players);
           } else if (isWaitingRoom) {
             // Only re-fetch waiting room players if not yet in game_state
-            fetchPlayers(roomId).then(onPlayersChange).catch(() => {});
+            fetchPlayers(roomId).then((ps) => {
+              if (isWaitingRoom) onPlayersChange(ps);
+            }).catch(() => {});
           }
         }
       }
@@ -199,7 +203,9 @@ export function roomSync(
         if (!isWaitingRoom) return;
         try {
           const players = await fetchPlayers(roomId);
-          onPlayersChange(players);
+          if (isWaitingRoom) {
+            onPlayersChange(players);
+          }
         } catch {
           // best-effort fetch
         }

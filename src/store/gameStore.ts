@@ -81,6 +81,7 @@ let currentScheduledTurnKey: string | null = null;
 let pendingTrickTimeout: ReturnType<typeof setTimeout> | null = null;
 let currentPendingTrickKey: string | null = null;
 let isResolvingTrick = false;
+let reconnectPromise: Promise<boolean> | null = null;
 
 /**
  * Self-healing trick resolver:
@@ -293,19 +294,24 @@ export function triggerBotTurnIfNeeded(getState: () => GameStore) {
  */
 function mergeIncomingRoom(currentRoom: RoomRow | null, incomingRoom: RoomRow): RoomRow {
   if (
-    currentRoom &&
+    currentRoom?.game_state &&
+    incomingRoom?.game_state &&
     currentRoom.game_state.roundNumber === incomingRoom.game_state.roundNumber &&
+    Array.isArray(currentRoom.game_state.centerPile) &&
     currentRoom.game_state.centerPile.length > 0
   ) {
+    const inCenterPile = Array.isArray(incomingRoom.game_state.centerPile)
+      ? incomingRoom.game_state.centerPile
+      : [];
     const missingCards = currentRoom.game_state.centerPile.filter(
-      (localTc) => !incomingRoom.game_state.centerPile.some((inTc) => inTc.card.id === localTc.card.id)
+      (localTc) => localTc?.card && !inCenterPile.some((inTc) => inTc?.card?.id === localTc.card.id)
     );
     if (missingCards.length > 0) {
       return {
         ...incomingRoom,
         game_state: {
           ...incomingRoom.game_state,
-          centerPile: [...incomingRoom.game_state.centerPile, ...missingCards],
+          centerPile: [...inCenterPile, ...missingCards],
           leadSuit: incomingRoom.game_state.leadSuit || currentRoom.game_state.leadSuit,
         },
       };
@@ -320,17 +326,26 @@ function arePlayersEqual(a: PlayerRow[] | undefined, b: PlayerRow[] | undefined)
   for (let i = 0; i < a.length; i++) {
     const p1 = a[i];
     const p2 = b[i];
+    if (!p1 || !p2) return false;
+    const p1Cards = Array.isArray(p1.cards) ? p1.cards : [];
+    const p2Cards = Array.isArray(p2.cards) ? p2.cards : [];
     if (
       p1.id !== p2.id ||
-      p1.cards.length !== p2.cards.length ||
+      p1Cards.length !== p2Cards.length ||
       p1.escaped !== p2.escaped ||
       p1.escape_rank !== p2.escape_rank ||
       p1.is_host !== p2.is_host ||
       p1.seat_order !== p2.seat_order ||
       p1.name !== p2.name ||
-      p1.ready !== p2.ready
+      p1.ready !== p2.ready ||
+      p1.connected !== p2.connected
     ) {
       return false;
+    }
+    for (let c = 0; c < p1Cards.length; c++) {
+      if (p1Cards[c]?.id !== p2Cards[c]?.id) {
+        return false;
+      }
     }
   }
   return true;
@@ -351,7 +366,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setToast: (t) => set({ toast: t }),
 
   me: () => {
-    const { players, myId } = get();
+    const { room, players, myId } = get();
+    if (!myId) return null;
+    if (room && room.status !== 'waiting' && room.game_state?.players && room.game_state.players.length > 0) {
+      return room.game_state.players.find((p) => p.id === myId) ?? players.find((p) => p.id === myId) ?? null;
+    }
     return players.find((p) => p.id === myId) ?? null;
   },
 
@@ -381,11 +400,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
           clearSession();
         },
         (ps) => {
+          const currentRoom = get().room;
+          if (currentRoom && currentRoom.status !== 'waiting' && currentRoom.game_state?.players?.length) {
+            return;
+          }
           if (!arePlayersEqual(get().players, ps)) {
             set({ players: ps });
             triggerBotTurnIfNeeded(get);
           }
-        }
+        },
+        room.status
       );
       saveSession({ roomId: room.id, roomCode: room.code, playerId: player.id });
       set({ room, players, myId: player.id, view: 'game', loading: false, unsubscribe: unsub });
@@ -422,11 +446,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
           clearSession();
         },
         (ps) => {
+          const currentRoom = get().room;
+          if (currentRoom && currentRoom.status !== 'waiting' && currentRoom.game_state?.players?.length) {
+            return;
+          }
           if (!arePlayersEqual(get().players, ps)) {
             set({ players: ps });
             triggerBotTurnIfNeeded(get);
           }
-        }
+        },
+        room.status
       );
       saveSession({ roomId: room.id, roomCode: room.code, playerId: player.id });
       set({ room, players, myId: player.id, view: 'game', loading: false, unsubscribe: unsub });
@@ -436,54 +465,155 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   tryReconnect: async () => {
-    const session = loadSession();
-    if (!session) return false;
-    try {
-      const room = await fetchRoom(session.roomId);
-      if (!room) {
-        clearSession();
-        return false;
+    if (reconnectPromise) {
+      return reconnectPromise;
+    }
+
+    reconnectPromise = (async () => {
+      const session = loadSession();
+      if (!session) return false;
+
+      // Clean up previous subscription if any to prevent channel conflicts
+      const prevUnsub = get().unsubscribe;
+      if (prevUnsub) {
+        try {
+          prevUnsub();
+        } catch {
+          // best-effort cleanup
+        }
       }
-      const players = await fetchPlayers(room.id);
-      const me = players.find((p) => p.id === session.playerId);
-      if (!me) {
-        clearSession();
-        return false;
-      }
-      await updatePlayer(me.id, { connected: true });
-      const unsub = roomSync(
-        room.id,
-        (r) => {
-          const finalRoom = mergeIncomingRoom(get().room, r);
-          const incomingPlayers = finalRoom.game_state?.players;
-          if (incomingPlayers && incomingPlayers.length > 0) {
-            if (arePlayersEqual(get().players, incomingPlayers)) {
-              set({ room: finalRoom });
-            } else {
-              set({ room: finalRoom, players: incomingPlayers });
-            }
-          } else {
-            set({ room: finalRoom });
-          }
-          triggerBotTurnIfNeeded(get);
-        },
-        () => {
-          set({ room: null, players: [], view: 'landing' });
+
+      try {
+        const room = await fetchRoom(session.roomId);
+        if (!room) {
+          console.warn('[Reconnect] Room no longer exists in database.');
           clearSession();
-        },
-        (ps) => {
-          if (!arePlayersEqual(get().players, ps)) {
-            set({ players: ps });
-            triggerBotTurnIfNeeded(get);
+          return false;
+        }
+
+        const rawPlayers = await fetchPlayers(room.id);
+        const inGamePlayers = room.game_state?.players;
+        const isGameActive = room.status !== 'waiting' && Array.isArray(inGamePlayers) && inGamePlayers.length > 0;
+
+        // Extract set of cards that are currently in the discard pile or on the table in centerPile
+        const playedCardIds = new Set<string>();
+        if (room.game_state?.discardPile && Array.isArray(room.game_state.discardPile)) {
+          for (const c of room.game_state.discardPile) {
+            if (c?.id) playedCardIds.add(c.id);
           }
         }
-      );
-      set({ room, players, myId: me.id, view: 'game', unsubscribe: unsub });
-      return true;
-    } catch {
-      clearSession();
-      return false;
-    }
+        if (room.game_state?.centerPile && Array.isArray(room.game_state.centerPile)) {
+          for (const tc of room.game_state.centerPile) {
+            if (tc?.card?.id) playedCardIds.add(tc.card.id);
+          }
+        }
+
+        // Reconcile players:
+        // When game is active, room.game_state.players is canonical for live hands, escape state and ranks.
+        // Filter out any cards that have already been played/discarded to prevent ghost card resurrection on refresh.
+        // Merge DB row fields (connected, name, avatar, is_host) to keep metadata up to date.
+        const resolvedPlayers: PlayerRow[] = isGameActive
+          ? inGamePlayers.map((gp) => {
+              const dbRow = rawPlayers.find((p) => p.id === gp.id);
+              const hand = Array.isArray(gp.cards) ? gp.cards : [];
+              const cleanCards = playedCardIds.size > 0 ? hand.filter((c) => c?.id && !playedCardIds.has(c.id)) : hand;
+              return {
+                ...gp,
+                cards: cleanCards,
+                name: dbRow?.name ?? gp.name,
+                avatar_color: dbRow?.avatar_color ?? gp.avatar_color,
+                is_host: dbRow?.is_host ?? gp.is_host,
+                is_bot: gp.is_bot ?? dbRow?.is_bot ?? (gp.name?.startsWith('Bot ') || gp.name?.toLowerCase().includes('bot')),
+                connected: gp.id === session.playerId ? true : (dbRow?.connected ?? gp.connected ?? true),
+              };
+            })
+          : rawPlayers;
+
+        const me =
+          resolvedPlayers.find((p) => p.id === session.playerId) ??
+          rawPlayers.find((p) => p.id === session.playerId);
+
+        // Only clear session if players were fetched and the player is definitively absent
+        if (!me && rawPlayers.length > 0) {
+          console.warn('[Reconnect] Player record not found in room.');
+          clearSession();
+          return false;
+        }
+        if (!me) {
+          return false;
+        }
+
+        // Safe presence ping: failure must never break reconnection
+        updatePlayer(me.id, { connected: true }).catch((err) => {
+          console.warn('[Reconnect] Presence ping failed:', err);
+        });
+
+        const finalRoom: RoomRow = isGameActive
+          ? {
+              ...room,
+              game_state: {
+                ...room.game_state,
+                players: resolvedPlayers,
+              },
+            }
+          : room;
+
+        const unsub = roomSync(
+          room.id,
+          (r) => {
+            const finalRoom = mergeIncomingRoom(get().room, r);
+            const incomingPlayers = finalRoom.game_state?.players;
+            if (incomingPlayers && incomingPlayers.length > 0) {
+              if (arePlayersEqual(get().players, incomingPlayers)) {
+                set({ room: finalRoom });
+              } else {
+                set({ room: finalRoom, players: incomingPlayers });
+              }
+            } else {
+              set({ room: finalRoom });
+            }
+            triggerBotTurnIfNeeded(get);
+          },
+          () => {
+            set({ room: null, players: [], view: 'landing' });
+            clearSession();
+          },
+          (ps) => {
+            const currentRoom = get().room;
+            // Guard: when game is in progress, canonical game_state.players is authoritative for hands.
+            // Never let stale DB rows from the players table overwrite live hands or resurrect discarded cards!
+            if (currentRoom && currentRoom.status !== 'waiting' && currentRoom.game_state?.players?.length) {
+              return;
+            }
+            if (!arePlayersEqual(get().players, ps)) {
+              set({ players: ps });
+              triggerBotTurnIfNeeded(get);
+            }
+          },
+          room.status
+        );
+
+        set({
+          room: finalRoom,
+          players: resolvedPlayers,
+          myId: me.id,
+          view: 'game',
+          unsubscribe: unsub,
+        });
+
+        triggerBotTurnIfNeeded(get);
+        checkAndResolvePendingTrick(get);
+        return true;
+      } catch (err) {
+        console.error('[Reconnect] Error during reconnection:', err);
+        // Do NOT clearSession() on transient network or runtime errors!
+        return false;
+      }
+    })().finally(() => {
+      reconnectPromise = null;
+    });
+
+    return reconnectPromise;
   },
 
   leaveRoom: async () => {
@@ -649,16 +779,24 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (room.game_state.currentTurn !== botPlayer.id) return;
     if (room.game_state.centerPile.some((tc) => tc.playerId === botPlayer.id)) return;
 
-    const freshPlayer = players.find((p) => p.id === botPlayer.id) ?? botPlayer;
+    const freshPlayer =
+      (room.game_state.players?.find((p) => p.id === botPlayer.id)) ??
+      players.find((p) => p.id === botPlayer.id) ??
+      botPlayer;
     if (!freshPlayer || freshPlayer.cards.length === 0) return;
 
     try {
+      const activePlayers =
+        room.game_state.players && room.game_state.players.length > 0
+          ? room.game_state.players
+          : players;
+
       const card = chooseBotCard(
         freshPlayer.cards,
         room.game_state.leadSuit,
         room.game_state.roundNumber,
         room.game_state.centerPile,
-        players,
+        activePlayers,
         room.game_state.discardPile
       );
       if (!card) return;

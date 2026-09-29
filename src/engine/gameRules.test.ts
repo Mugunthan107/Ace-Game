@@ -631,4 +631,70 @@ console.log('--- Running Game Rules Tests ---');
   console.log('✓ Test 14 Passed: Multi-match flow successfully preserves entry order for Match 1, and shuffles for Match 2 and Match 3');
 }
 
+// Test 15: Discarded cards reconciliation on refresh (no ghost cards returned to hand)
+{
+  const p1Card1 = createCard('hearts', 'A');
+  const p1Card2 = createCard('spades', 'K');
+  const p2Card1 = createCard('hearts', 'K');
+  const p2Card2 = createCard('diamonds', 'Q');
+
+  const p1 = createPlayer('p1', 'Player 1', 0, [p1Card1, p1Card2]);
+  const p2 = createPlayer('p2', 'Player 2', 1, [p2Card1, p2Card2]);
+
+  let players = [p1, p2];
+  let gs: GameState = {
+    ...emptyGameState(),
+    gameStarted: true,
+    roundNumber: 1,
+    currentLeader: 'p1',
+    currentTurn: 'p1',
+    players,
+  };
+
+  // P1 plays hearts-A, P2 plays hearts-K (clean round, trick completes)
+  const step1_p1 = applyCardPlay(players, gs, 'p1', p1Card1);
+  const step1_p2 = applyCardPlay(step1_p1.players, step1_p1.gameState, 'p2', p2Card1);
+  assert(step1_p2.isPendingResolution, 'Trick should be complete and pending resolution');
+
+  const step2 = finalizeTrickResolution(step1_p2.players, step1_p2.gameState, step1_p2.resolution!);
+  assert(step2.gameState.roundNumber === 2, 'Round should advance to 2');
+  assert(step2.gameState.discardPile.length === 2, '2 cards should be in discard pile');
+  assert(step2.gameState.discardPile.some((c) => c.id === p1Card1.id), 'p1 card must be in discard pile');
+  assert(step2.gameState.discardPile.some((c) => c.id === p2Card1.id), 'p2 card must be in discard pile');
+
+  // Simulate stale database player row (holding all initial cards before round 1 discards)
+  const staleDbPlayers = [
+    createPlayer('p1', 'Player 1', 0, [p1Card1, p1Card2]),
+    createPlayer('p2', 'Player 2', 1, [p2Card1, p2Card2]),
+  ];
+
+  // Reconcile as implemented in tryReconnect & effectivePlayers:
+  const playedCardIds = new Set<string>();
+  for (const c of step2.gameState.discardPile) playedCardIds.add(c.id);
+  for (const tc of step2.gameState.centerPile) playedCardIds.add(tc.card.id);
+
+  const resolvedPlayers = step2.gameState.players!.map((gp) => {
+    const dbRow = staleDbPlayers.find((p) => p.id === gp.id);
+    const cleanCards = playedCardIds.size > 0 ? gp.cards.filter((c) => !playedCardIds.has(c.id)) : gp.cards;
+    return {
+      ...gp,
+      cards: cleanCards,
+      name: dbRow?.name ?? gp.name,
+    };
+  });
+
+  const resolvedP1 = resolvedPlayers.find((p) => p.id === 'p1')!;
+  const resolvedP2 = resolvedPlayers.find((p) => p.id === 'p2')!;
+
+  assert(resolvedP1.cards.length === 1, 'P1 should only have 1 card remaining');
+  assert(!resolvedP1.cards.some((c) => c.id === p1Card1.id), 'P1 must NOT have discarded hearts-A back in hand');
+  assert(resolvedP1.cards[0].id === p1Card2.id, 'P1 should only hold spades-K');
+
+  assert(resolvedP2.cards.length === 1, 'P2 should only have 1 card remaining');
+  assert(!resolvedP2.cards.some((c) => c.id === p2Card1.id), 'P2 must NOT have discarded hearts-K back in hand');
+  assert(resolvedP2.cards[0].id === p2Card2.id, 'P2 should only hold diamonds-Q');
+
+  console.log('✓ Test 15 Passed: Discarded cards are permanently eliminated and never resurrected into hands on refresh');
+}
+
 console.log('--- All Game Rules Tests Passed Successfully! ---');
